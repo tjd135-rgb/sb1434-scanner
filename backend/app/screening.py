@@ -32,6 +32,34 @@ MIN_SQFOOT = 217_800
 ADJACENCY_METERS = 152.4
 
 
+# Indexes we ensure at the top of every screen run. All are idempotent — the
+# alembic migration also creates equivalent indexes, but production has been
+# observed running without them (Gate 4's ST_DWithin on ~2M parcels timed
+# out) so we belt-and-suspenders it here. The critical one is the functional
+# geography index: the Gate 4 query casts `geom::geography` on both sides,
+# and the plain GIST on `geom` is not usable through that cast.
+_ENSURE_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_parcels_centroid "
+    "ON parcels USING GIST (geom)",
+    "CREATE INDEX IF NOT EXISTS idx_parcels_centroid_geog "
+    "ON parcels USING GIST ((geom::geography))",
+    "CREATE INDEX IF NOT EXISTS idx_parcels_dor_uc "
+    "ON parcels (dor_uc)",
+]
+
+
+def ensure_indexes() -> None:
+    """Create the spatial + dor_uc indexes on parcels if missing. Runs in its
+    own auto-committing transaction so index state persists even if the
+    subsequent screen run fails partway through."""
+    log.info("Verifying spatial + dor_uc indexes on parcels")
+    with engine.begin() as conn:
+        for stmt in _ENSURE_INDEXES:
+            log.info("  %s", stmt)
+            conn.execute(text(stmt))
+    log.info("Indexes ready")
+
+
 _INSERT_QUALIFIERS = text(
     """
     INSERT INTO qualifying_parcels (
@@ -130,7 +158,7 @@ _UPDATE_ADJACENCY = text(
        SET adjacent_residential = EXISTS (
            SELECT 1
              FROM parcels r
-            WHERE r.dor_uc IN ('001','002','003','004','005','006','007','008','009')
+            WHERE r.dor_uc BETWEEN '001' AND '009'
               AND r.parcel_id != qp.parcel_id
               AND ST_DWithin(
                     r.geom::geography,
@@ -176,6 +204,10 @@ _STATS_BY_PATHWAY = text(
 def run_screen(update_adjacency: bool = True) -> Dict[str, Any]:
     """Run the qualifying-parcel screen end-to-end and return summary stats."""
     log.info("=== SB 1434 screening starting ===")
+
+    # Ensure Gate 4 has an index to lean on. Committed before the main
+    # transaction so the index survives even if the screen crashes.
+    ensure_indexes()
 
     with engine.begin() as conn:
         n_parcels = conn.execute(text("SELECT COUNT(*) FROM parcels")).scalar_one()
