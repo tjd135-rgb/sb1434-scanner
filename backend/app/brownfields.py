@@ -39,7 +39,9 @@ AREAS_LAYER = f"{FDEP_BASE}/0"
 SITES_LAYER = f"{FDEP_BASE}/1"
 
 # ArcGIS caps single-request features at 1000-2000 depending on service; use a
-# conservative batch size and paginate by ObjectID to be safe.
+# conservative batch size. Pagination is done via WHERE OBJECTID > last_seen so
+# request URLs stay short (embedding all ObjectIDs blew past the server's URL
+# length limit and returned 404).
 BATCH_SIZE = 500
 HTTP_TIMEOUT = 60
 TRI_COUNTIES = ("DADE", "BROWARD", "PALM BEACH")
@@ -47,54 +49,85 @@ TRI_COUNTIES = ("DADE", "BROWARD", "PALM BEACH")
 
 # ---------- HTTP helpers ----------
 
-def _fetch_object_ids(layer_url: str, where: str = "1=1") -> List[int]:
-    """Return every ObjectID matching `where`, sorted ascending."""
-    r = requests.get(
-        f"{layer_url}/query",
-        params={"where": where, "returnIdsOnly": "true", "f": "json"},
-        timeout=HTTP_TIMEOUT,
-    )
-    r.raise_for_status()
-    payload = r.json()
-    if "error" in payload:
-        raise RuntimeError(f"FDEP returned error for IDs query: {payload['error']}")
-    ids = payload.get("objectIds") or []
-    ids.sort()
-    return ids
-
-
-def _fetch_features(layer_url: str, oids: Iterable[int]) -> List[Dict[str, Any]]:
-    """Fetch GeoJSON features for the given ObjectIDs (comma-joined)."""
-    oid_list = ",".join(str(i) for i in oids)
+def _fetch_page(layer_url: str, where: str, batch_size: int) -> List[Dict[str, Any]]:
+    """Fetch one page of GeoJSON features matching `where`, sorted by OBJECTID."""
     r = requests.get(
         f"{layer_url}/query",
         params={
-            "objectIds": oid_list,
+            "where": where,
             "outFields": "*",
             "outSR": "4326",
+            "orderByFields": "OBJECTID ASC",
+            "resultRecordCount": batch_size,
             "f": "geojson",
         },
         timeout=HTTP_TIMEOUT,
     )
     r.raise_for_status()
     payload = r.json()
+    if isinstance(payload, dict) and "error" in payload:
+        raise RuntimeError(f"FDEP returned error: {payload['error']}")
     return payload.get("features", [])
 
 
+def _feature_oid(feat: Dict[str, Any]) -> Optional[int]:
+    """Extract OBJECTID from a GeoJSON feature (properties are case-sensitive)."""
+    props = feat.get("properties") or {}
+    for key in ("OBJECTID", "ObjectID", "objectid", "OBJECTID_1", "FID"):
+        v = props.get(key)
+        if v is not None:
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                continue
+    fid = feat.get("id")
+    if fid is not None:
+        try:
+            return int(fid)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _paginate(layer_url: str, batch_size: int = BATCH_SIZE) -> Iterable[Dict[str, Any]]:
-    """Yield every GeoJSON feature in the layer, batched by ObjectID."""
-    ids = _fetch_object_ids(layer_url)
-    log.info("Layer %s: %d ObjectIDs to fetch", layer_url, len(ids))
-    for start in range(0, len(ids), batch_size):
-        chunk = ids[start : start + batch_size]
-        feats = _fetch_features(layer_url, chunk)
+    """Yield every GeoJSON feature in the layer.
+
+    Uses WHERE-clause keyset pagination on OBJECTID so each request URL is
+    small. The first page uses `1=1`; subsequent pages use
+    `OBJECTID > <last_seen>` and always sort by OBJECTID ASC.
+    """
+    where = "1=1"
+    page = 0
+    total = 0
+    while True:
+        feats = _fetch_page(layer_url, where, batch_size)
+        page += 1
+        if not feats:
+            log.info("Layer %s: page %d empty; done (%d total)", layer_url, page, total)
+            break
+
+        # Find max OBJECTID in the page to advance the WHERE cursor. If we
+        # can't extract OIDs, bail out to avoid an infinite loop.
+        oids = [oid for oid in (_feature_oid(f) for f in feats) if oid is not None]
+        total += len(feats)
         log.info(
-            "  page %d-%d: %d features returned",
-            start,
-            start + len(chunk) - 1,
-            len(feats),
+            "  page %d: %d features (running total %d)",
+            page, len(feats), total,
         )
         yield from feats
+
+        if len(feats) < batch_size:
+            log.info("Layer %s: short page; done (%d total)", layer_url, total)
+            break
+        if not oids:
+            log.warning(
+                "Layer %s: page %d had features but no OBJECTID; stopping to avoid loop",
+                layer_url, page,
+            )
+            break
+
+        last_oid = max(oids)
+        where = f"OBJECTID>{last_oid}"
 
 
 # ---------- Field mapping helpers ----------
