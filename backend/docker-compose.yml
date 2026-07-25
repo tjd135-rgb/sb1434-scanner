@@ -1,0 +1,24 @@
+# Local dev helper: Postgres + PostGIS. Run the FastAPI app on the host.
+#
+# Usage:
+#   docker compose up -d
+#   cp .env.example .env
+#   pip install -r requirements.txt
+#   alembic upgrade head
+#   uvicorn app.main:app --reload
+
+version: "3.9"
+services:
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    environment:
+      POSTGRES_USER: sb1434
+      POSTGRES_PASSWORD: sb1434
+      POSTGRES_DB: sb1434
+    ports:
+      - "5432:5432"
+    volumes:
+      - sb1434_pg_data:/var/lib/postgresql/data
+
+volumes:
+  sb1434_pg_data:

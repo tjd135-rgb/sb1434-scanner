@@ -1,0 +1,34 @@
+# Render blueprint. Deploy from repo root by pointing Render at this file.
+# Provisions: (1) Postgres+PostGIS DB (sb1434-scanner-db), (2) FastAPI web
+# service (sb1434-scanner-api).
+#
+# Render's managed Postgres includes PostGIS; the app's migration does
+# CREATE EXTENSION IF NOT EXISTS postgis on first run.
+
+databases:
+  - name: sb1434-scanner-db
+    plan: basic-256mb
+    databaseName: sb1434
+    user: sb1434
+
+services:
+  - type: web
+    name: sb1434-scanner-api
+    runtime: python
+    plan: starter
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    disk:
+      name: nal-data
+      mountPath: /opt/render/project/src/backend/data
+      sizeGB: 3
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sb1434-scanner-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.11.9"
