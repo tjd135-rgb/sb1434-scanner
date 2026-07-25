@@ -13,9 +13,10 @@ Source resolution order (per county):
 
 Env vars (all optional):
   NAL_RELEASE_URL   Base URL for release assets.
-                    Default: https://github.com/tjd135-rgb/lla-scanner/releases/download/nal-2025
-  NAL_ASSET_PATTERN Filename pattern, {fips:02d} interpolated in.
-                    Default: nal-{fips:02d}.zip
+                    Default: https://github.com/tjd135-rgb/sb1434-scanner/releases/download/nal-2025
+  NAL_ASSET_PATTERN Filename pattern, {fips} interpolated in (county_fips
+                    is always 2 digits for our tri-county set).
+                    Default: nal-{fips}.zip
   DOR_PORTAL_URL    DOR data portal root, used only for the pattern fallback.
 
 Usage:
@@ -65,9 +66,9 @@ COUNTIES: Dict[str, int] = {
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "nal"
 NAL_RELEASE_URL = os.getenv(
     "NAL_RELEASE_URL",
-    "https://github.com/tjd135-rgb/lla-scanner/releases/download/nal-2025",
+    "https://github.com/tjd135-rgb/sb1434-scanner/releases/download/nal-2025",
 )
-NAL_ASSET_PATTERN = os.getenv("NAL_ASSET_PATTERN", "nal-{fips:02d}.zip")
+NAL_ASSET_PATTERN = os.getenv("NAL_ASSET_PATTERN", "nal-{fips}.zip")
 DOR_PORTAL_URL = os.getenv("DOR_PORTAL_URL", "https://floridarevenue.com/property/dataportal/")
 
 # Persisted columns, in load order. Must match the staging DDL.

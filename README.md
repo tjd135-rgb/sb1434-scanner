@@ -40,8 +40,8 @@ columns already exist on `qualifying_parcels`.
    curl -X POST https://<your-service>.onrender.com/admin/ingest-nal \
         -H "content-type: application/json" -d '{"county":"all"}'
    ```
-   Assets default to the LLA scanner GitHub release
-   (`nal-2025/nal-{fips:02d}.zip`). Override with `NAL_RELEASE_URL` /
+   Assets default to this repo's own GitHub release
+   (`nal-2025/nal-{fips}.zip`). Override with `NAL_RELEASE_URL` /
    `NAL_ASSET_PATTERN` env vars if your release layout differs.
 6. Backfill centroids (~30-60 min tri-county):
    ```
