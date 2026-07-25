@@ -5,7 +5,7 @@ every individual brownfield-site polygon (Layer 1) from FDEP's public ArcGIS
 REST endpoint and upserts them into PostGIS.
 
 FDEP quirks worth knowing:
-- County name for Miami-Dade is stored as 'DADE'.
+- County name for Miami-Dade is stored as 'MIAMI-DADE'.
 - Field names on Layer 0/1 are UPPERCASE.
 - Geometry may come back as either a Polygon or MultiPolygon; PostGIS is
   normalized to MULTIPOLYGON on insert via ST_Multi.
@@ -44,7 +44,7 @@ SITES_LAYER = f"{FDEP_BASE}/1"
 # length limit and returned 404).
 BATCH_SIZE = 500
 HTTP_TIMEOUT = 60
-TRI_COUNTIES = ("DADE", "BROWARD", "PALM BEACH")
+TRI_COUNTIES = ("MIAMI-DADE", "BROWARD", "PALM BEACH")
 
 
 # ---------- HTTP helpers ----------

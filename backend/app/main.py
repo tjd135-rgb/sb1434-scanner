@@ -1,4 +1,4 @@
-"""FastAPI app for sb1434-scanner (Phase B).
+"""FastAPI app for sb1434-scanner (Phases A + B).
 
 Endpoints:
 - GET  /health
@@ -7,14 +7,19 @@ Endpoints:
 - GET  /qualifying-parcels             (list, filterable by county/pathway/etc)
 - GET  /qualifying-parcels/{parcel_id} (detail)
 - GET  /stats                          (aggregate counts + totals)
-- POST /admin/ingest-brownfields       (fires FDEP ingest; long-running)
-- POST /admin/run-screening            (fires the SB 1434 screen)
+- POST /admin/ingest-brownfields       (FDEP ingest)
+- POST /admin/ingest-nal               (Phase A: NAL parcel ingest)
+- POST /admin/ingest-centroids         (Phase A: parcel-centroid backfill)
+- POST /admin/run-screening            (SB 1434 screen)
+- GET  /admin/status                   (which long-running jobs are active)
 """
 from __future__ import annotations
 
 import logging
+import threading
+import traceback
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -24,6 +29,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from . import brownfields as bf
+from . import centroids as cent
+from . import ingest as nal
 from . import screening as scr
 from .db import engine, get_db
 
@@ -94,7 +101,7 @@ _AREA_LIST_COLS = (
 def list_brownfield_areas(
     county: Optional[str] = Query(
         None,
-        description="Case-insensitive substring match on county (e.g. 'DADE', 'BROWARD', 'PALM BEACH')",
+        description="Case-insensitive substring match on county (e.g. 'MIAMI-DADE', 'BROWARD', 'PALM BEACH')",
     ),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
@@ -225,24 +232,120 @@ class ScreenRequest(BaseModel):
     update_adjacency: bool = True
 
 
+class NalIngestRequest(BaseModel):
+    # 'miami-dade' | 'broward' | 'palm-beach' | 'all'
+    county: str = "all"
+
+
+class CentroidIngestRequest(BaseModel):
+    # '23' | '16' | '60' | 'all'
+    county: str = "all"
+
+
+# In-memory job registry for the long-running admin endpoints. Not persisted
+# across restarts — fine for a single-worker Render web service.
+_JOBS: Dict[str, Dict[str, Any]] = {}
+_JOBS_LOCK = threading.Lock()
+
+
+def _now_iso() -> str:
+    return datetime.now(tz=timezone.utc).isoformat()
+
+
+def _start_job(name: str, target, *args, **kwargs) -> Dict[str, Any]:
+    """Start a background thread. Refuses to start if a same-named job is
+    already running so we don't accidentally double-load the DB."""
+    with _JOBS_LOCK:
+        existing = _JOBS.get(name)
+        if existing and existing.get("status") == "running":
+            raise HTTPException(
+                status_code=409,
+                detail=f"job {name!r} already running since {existing.get('started_at')}",
+            )
+        job = {
+            "name": name,
+            "status": "running",
+            "started_at": _now_iso(),
+            "finished_at": None,
+            "result": None,
+            "error": None,
+        }
+        _JOBS[name] = job
+
+    def _run():
+        try:
+            result = target(*args, **kwargs)
+            with _JOBS_LOCK:
+                job["status"] = "ok"
+                job["result"] = result
+        except Exception as e:
+            with _JOBS_LOCK:
+                job["status"] = "error"
+                job["error"] = f"{type(e).__name__}: {e}"
+                job["traceback"] = traceback.format_exc()
+            log.exception("job %s failed", name)
+        finally:
+            with _JOBS_LOCK:
+                job["finished_at"] = _now_iso()
+
+    threading.Thread(target=_run, name=f"job-{name}", daemon=True).start()
+    return {"job": name, "status": "started", "started_at": job["started_at"]}
+
+
+@app.get("/admin/status")
+def admin_status() -> Dict[str, Any]:
+    """Snapshot of every background job started this process lifetime."""
+    with _JOBS_LOCK:
+        # Copy so callers don't see mutations mid-serialize.
+        return {"jobs": {k: dict(v) for k, v in _JOBS.items()}}
+
+
 @app.post("/admin/ingest-brownfields")
 def admin_ingest_brownfields() -> Dict[str, Any]:
-    """Synchronous FDEP ingest. Takes a few minutes; consider background
-    execution if the frontend calls this on demand."""
+    """Kick off FDEP ingest in a background thread. Poll /admin/status."""
+    return _start_job("ingest-brownfields", bf.ingest_all)
+
+
+@app.post("/admin/ingest-nal")
+def admin_ingest_nal(payload: NalIngestRequest | None = None) -> Dict[str, Any]:
+    """Kick off NAL parcel ingest. Loads DOR NAL for the given county (or 'all')
+    from the LLA scanner's GitHub release. Runs in background — this is a
+    multi-minute operation."""
+    county = (payload.county if payload else "all").lower()
+    if county != "all" and county not in nal.COUNTIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"county must be one of {list(nal.COUNTIES) + ['all']}",
+        )
+    return _start_job(f"ingest-nal:{county}", nal.run, county)
+
+
+@app.post("/admin/ingest-centroids")
+def admin_ingest_centroids(payload: CentroidIngestRequest | None = None) -> Dict[str, Any]:
+    """Kick off parcel-centroid backfill against the FL Statewide FeatureServer.
+    Runs in background — the full tri-county sweep takes ~30-60 minutes."""
+    county = (payload.county if payload else "all").lower()
+    if county == "all":
+        return _start_job("ingest-centroids:all", cent.run_all)
     try:
-        return bf.ingest_all()
-    except Exception as e:
-        log.exception("brownfield ingest failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        fips = int(county)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="county must be 23, 16, 60, or 'all'")
+    if fips not in cent.SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"county_fips must be one of {sorted(cent.SOURCES)} or 'all'",
+        )
+    return _start_job(f"ingest-centroids:{fips}", cent.load_county, cent.SOURCES[fips])
 
 
 @app.post("/admin/run-screening")
 def admin_run_screening(payload: ScreenRequest | None = None) -> Dict[str, Any]:
-    """Fire the qualifying-parcel screen. Requires parcels + brownfield_areas
-    to be populated first."""
+    """Kick off the qualifying-parcel screen. Requires parcels + brownfield_areas
+    populated first."""
     update_adjacency = payload.update_adjacency if payload else True
-    try:
-        return scr.run_screen(update_adjacency=update_adjacency)
-    except Exception as e:
-        log.exception("screening failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    return _start_job(
+        "run-screening",
+        scr.run_screen,
+        update_adjacency=update_adjacency,
+    )

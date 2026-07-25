@@ -31,16 +31,36 @@ columns already exist on `qualifying_parcels`.
    - Web service `sb1434-scanner-api` running FastAPI
 3. First deploy runs `alembic upgrade head`, which enables PostGIS and creates
    `parcels`, `brownfield_areas`, `brownfield_sites`, `qualifying_parcels`.
-4. Once the service is up, warm the brownfield data:
+4. Warm the brownfield data (few minutes):
    ```
    curl -X POST https://<your-service>.onrender.com/admin/ingest-brownfields
    ```
-   (Takes ~2-5 minutes, ~531 areas + all sites statewide.)
-5. Load the parcels table (Phase A ingest — separate step, not in this repo yet).
-6. Fire the screen:
+5. Ingest the DOR NAL parcels (Phase A — ~10-20 min per county):
+   ```
+   curl -X POST https://<your-service>.onrender.com/admin/ingest-nal \
+        -H "content-type: application/json" -d '{"county":"all"}'
+   ```
+   Assets default to the LLA scanner GitHub release
+   (`nal-2025/nal-{fips:02d}.zip`). Override with `NAL_RELEASE_URL` /
+   `NAL_ASSET_PATTERN` env vars if your release layout differs.
+6. Backfill centroids (~30-60 min tri-county):
+   ```
+   curl -X POST https://<your-service>.onrender.com/admin/ingest-centroids \
+        -H "content-type: application/json" -d '{"county":"all"}'
+   ```
+7. Run the SB 1434 screen:
    ```
    curl -X POST https://<your-service>.onrender.com/admin/run-screening
    ```
+8. Poll job status any time:
+   ```
+   curl https://<your-service>.onrender.com/admin/status
+   ```
+
+All admin endpoints kick off background threads and return immediately —
+watch Render's log stream for progress. You can also run any ingest as a
+CLI (`python -m app.ingest --county all`, `python -m app.centroids --county 23`)
+via `render ssh` if you prefer.
 
 ## Local development
 
@@ -66,7 +86,10 @@ Hit `http://localhost:8000/health` to confirm PostGIS is loaded.
 | GET | /qualifying-parcels/{parcel_id} | Detail |
 | GET | /stats | Aggregate counts by county / pathway |
 | POST | /admin/ingest-brownfields | Runs FDEP Layer 0 + Layer 1 ingest |
+| POST | /admin/ingest-nal | Body `{"county":"all"\|"miami-dade"\|"broward"\|"palm-beach"}` |
+| POST | /admin/ingest-centroids | Body `{"county":"all"\|"23"\|"16"\|"60"}` |
 | POST | /admin/run-screening | Runs SB 1434 screen; body `{"update_adjacency": true}` |
+| GET | /admin/status | Snapshot of in-flight/completed background jobs |
 
 ## Layout
 
@@ -84,6 +107,8 @@ backend/
     db.py                 # engine + session
     models.py             # SQLAlchemy ORM (4 tables)
     brownfields.py        # FDEP ArcGIS ingest
+    ingest.py             # Phase A: DOR NAL loader (CLI + library)
+    centroids.py          # Phase A: parcel-centroid backfill (CLI + library)
     screening.py          # SB 1434 gates as SQL
-    main.py               # FastAPI routes
+    main.py               # FastAPI routes + background-job runner
 ```
