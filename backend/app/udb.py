@@ -61,21 +61,36 @@ def _local_geojson() -> Optional[Path]:
     return hits[0] if hits else None
 
 
-def _fetch_from_url(url: str) -> Dict[str, Any]:
-    """Fetch a GeoJSON FeatureCollection from an ArcGIS REST layer URL.
+def _is_plain_geojson_url(url: str) -> bool:
+    """True if the URL points at a static GeoJSON/JSON file (raw GitHub,
+    S3, etc.) rather than an ArcGIS REST endpoint. Ignores query string
+    and fragment when inspecting the extension."""
+    path = urllib.parse.urlparse(url).path.lower()
+    return path.endswith(".geojson") or path.endswith(".json")
 
-    If the URL already ends in /query, use it as-is; otherwise append the
-    standard /query?where=1=1&outFields=*&outSR=4326&f=geojson tail.
+
+def _fetch_from_url(url: str) -> Dict[str, Any]:
+    """Fetch a GeoJSON FeatureCollection from either a static file URL
+    (e.g. raw.githubusercontent.com/.../udb.geojson) or an ArcGIS REST
+    layer URL.
+
+    Static file: simple GET, parse JSON as-is.
+    ArcGIS REST: append /query?where=1=1&outFields=*&outSR=4326&f=geojson
+    (unless the URL already ends in /query, in which case use as-is).
     """
-    if "/query" not in url:
-        params = {
-            "where": "1=1",
-            "outFields": "*",
-            "outSR": "4326",
-            "f": "geojson",
-        }
-        url = f"{url}/query?{urllib.parse.urlencode(params)}"
-    log.info("Fetching UDB from %s", url)
+    if _is_plain_geojson_url(url):
+        log.info("Fetching UDB (plain GeoJSON) from %s", url)
+    else:
+        if "/query" not in url:
+            params = {
+                "where": "1=1",
+                "outFields": "*",
+                "outSR": "4326",
+                "f": "geojson",
+            }
+            url = f"{url}/query?{urllib.parse.urlencode(params)}"
+        log.info("Fetching UDB (ArcGIS REST) from %s", url)
+
     r = requests.get(url, timeout=HTTP_TIMEOUT)
     if r.status_code != 200:
         raise RuntimeError(f"HTTP {r.status_code} from UDB source: {r.text[:400]}")
