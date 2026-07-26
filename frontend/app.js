@@ -681,6 +681,21 @@
       els.fRing.value = "";
       els.fUdb.value = "";
       els.fMinAcres.value = "";
+      // Clear the search too — reset means reset EVERYTHING.
+      if (els.fSearch) {
+        els.fSearch.value = "";
+        searchQuery = "";
+        if (els.fSearchClear) els.fSearchClear.hidden = true;
+      }
+      // Recenter the map to the tri-county default so a user who zoomed
+      // in on one result via the search box gets a clean slate.
+      map.setView(CENTER, ZOOM);
+      loadParcels();
+    });
+
+    // Golf Opportunities KPI acts as a shortcut to the Pathway 2 filter.
+    els.kpiGolf?.parentElement?.addEventListener("click", () => {
+      els.fPathway.value = "pathway_2_golf_not_ringed";
       loadParcels();
     });
   }
@@ -855,11 +870,23 @@
     if (target === "map") map.invalidateSize();
   }
 
+  function expandAllIntelSections() {
+    document.querySelectorAll(".intel-section").forEach((s) => { s.open = true; });
+  }
+
   function initViewTabs() {
     document.querySelectorAll(".view-btn").forEach((btn) => {
       btn.addEventListener("click", () => switchToView(btn.dataset.view));
     });
-    els.learnLink?.addEventListener("click", () => switchToView("intel"));
+    // The "Learn how this works" chip is an onboarding path for a first-
+    // timer — expand every Intel section so the full walkthrough is
+    // visible in one scroll, rather than making them click into each
+    // accordion. Users who reach Intel via the tab button keep the
+    // default behavior (only §1 and §6 open).
+    els.learnLink?.addEventListener("click", () => {
+      switchToView("intel");
+      expandAllIntelSections();
+    });
   }
 
   // ------------------------------------------------------------------

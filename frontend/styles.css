@@ -147,7 +147,15 @@ html, body {
 }
 .kpi-gold {
   background: linear-gradient(180deg, #23282f 0%, #1b1f27 100%);
+  cursor: pointer;
+  transition: background 0.12s ease;
 }
+.kpi-gold:hover {
+  background: linear-gradient(180deg, #2c333c 0%, #232833 100%);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.kpi-gold:active { transform: translateY(1px); }
 .kpi-label {
   font-size: 10px;
   color: var(--sidebar-muted);
