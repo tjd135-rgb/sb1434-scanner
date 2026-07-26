@@ -7,4 +7,9 @@ venv/
 .env.local
 backend/data/*
 !backend/data/.gitkeep
+# Reference boundary data lives in git so ingests work out of the box.
+!backend/data/udb/
+!backend/data/udb/*.geojson
+!backend/data/military/
+!backend/data/military/*.geojson
 .DS_Store
