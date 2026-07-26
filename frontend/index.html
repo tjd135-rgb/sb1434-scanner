@@ -119,12 +119,409 @@
   </aside>
 
   <main class="main">
-    <div id="map"></div>
-    <div id="loading" class="loading hidden">
-      <div class="spinner"></div>
-      <div class="loading-text">Loading parcels…</div>
+    <nav class="view-tabs" role="tablist">
+      <button class="view-btn active" data-view="map" role="tab" aria-selected="true">Map</button>
+      <button class="view-btn" data-view="intel" role="tab" aria-selected="false">Intel</button>
+    </nav>
+
+    <div id="view-map" class="view active">
+      <div id="map"></div>
+      <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <div class="loading-text">Loading parcels…</div>
+      </div>
+      <div id="toast" class="toast hidden"></div>
     </div>
-    <div id="toast" class="toast hidden"></div>
+
+    <div id="view-intel" class="view intel-view" hidden>
+      <article class="intel">
+        <header class="intel-hero">
+          <h1>SB 1434 Scanner · Analyst Intel</h1>
+          <p>Everything you need to interpret what the map is showing, from the statute
+             to the DOR use codes to the golf-course ring test.</p>
+        </header>
+
+        <details class="intel-section" open>
+          <summary><span class="s-num">1</span> What is SB 1434?</summary>
+          <div class="intel-body">
+            <p><strong>SB 1434 is Florida&#39;s Infill Redevelopment Act</strong>, codified at
+               <a href="https://www.flsenate.gov/Laws/Statutes/2025/163.2525" target="_blank" rel="noopener">§163.2525, F.S.</a>
+               It creates a streamlined pathway for redeveloping underutilized parcels sitting on
+               environmentally impacted land.</p>
+            <p>The statute applies only in <strong>Miami-Dade, Broward, and Palm Beach counties</strong> —
+               the three counties in Florida that meet its combined population and municipality
+               thresholds. The intent is to incentivize turning brownfield and contamination-adjacent
+               sites into productive infill development instead of pushing new construction farther out.</p>
+            <p class="callout">
+              <strong>Not the same as the Live Local Act.</strong> LLA targets attainable housing
+              on commercial/industrial land regardless of environmental status. SB 1434 targets
+              <em>infill redevelopment on environmentally compromised land</em> — brownfield areas
+              and DEP cleanup sites. The two overlap on some parcels but the underlying tests
+              and unlocked entitlements are distinct.
+            </p>
+          </div>
+        </details>
+
+        <details class="intel-section" open>
+          <summary><span class="s-num">2</span> What makes a parcel qualify?</summary>
+          <div class="intel-body">
+            <p>A parcel must pass <strong>all five</strong> gates below to appear on the map.</p>
+            <ol class="gates">
+              <li>
+                <strong>Gate 1 — Size (≥ 5 acres).</strong>
+                Computed as <code>LND_SQFOOT / 43,560 ≥ 5</code>. Small infill parcels don&#39;t make
+                the statute&#39;s density unlock economic.
+              </li>
+              <li>
+                <strong>Gate 2 — Tri-county.</strong>
+                <code>county_fips ∈ {23 Miami-Dade, 16 Broward, 60 Palm Beach}</code>.
+              </li>
+              <li>
+                <strong>Gate 3 — Environmental trigger (either/or).</strong> A parcel qualifies if
+                <em>either</em>:
+                <ul>
+                  <li><strong>Trigger B:</strong> centroid lies <em>inside</em> a designated FDEP
+                      brownfield area polygon, <em>or</em></li>
+                  <li><strong>Trigger A:</strong> centroid lies <em>within 1,500 ft</em> of a
+                      DEP cleanup-site point.</li>
+                </ul>
+                The <code>env_trigger</code> field records which matched
+                (<code>brownfield_area</code> / <code>cleanup_site</code> / <code>both</code>).
+              </li>
+              <li>
+                <strong>Gate 4 — Adjacent to residential.</strong>
+                A parcel with a residential DOR use code (001-009) sits within 500 ft. Almost
+                every South-Florida infill parcel meets this, but a handful deep inside a port
+                or a heavy-industry district fail.
+              </li>
+              <li>
+                <strong>Gate 5 — Not excluded.</strong> Parcel must <em>not</em> be:
+                <ul>
+                  <li>Agricultural (DOR 050-069),</li>
+                  <li>A government-owned public park (DOR 082 + owner name contains
+                      "CITY OF", "COUNTY OF", etc.),</li>
+                  <li>Within ¼ mile (1,320 ft) of a military installation identified in
+                      <a href="https://www.flsenate.gov/Laws/Statutes/2025/163.3175" target="_blank" rel="noopener">§163.3175(2)</a>
+                      — Homestead ARB, USSOUTHCOM Doral, USCG Miami Beach/Sector Miami/Ft
+                      Lauderdale, FL ANG Homestead Armory.</li>
+                </ul>
+                The utility check (parcel currently owned by an FPL/Duke/TECO-style entity, or
+                use code 091-097) is a <em>flag</em>, not an exclusion — the 15-year lookback
+                needs manual title research.
+              </li>
+            </ol>
+          </div>
+        </details>
+
+        <details class="intel-section" open>
+          <summary><span class="s-num">3</span> Understanding the 13 pathways</summary>
+          <div class="intel-body">
+            <p>Every qualifying parcel is classified into one of 13 redevelopment pathways based
+               on DOR use code (and, for golf, on the ring test). Order in the CASE matters —
+               more specific codes win over broader ones.</p>
+
+            <div class="pathway-grid">
+              <div class="pw" data-color="#d93b3b">
+                <div class="pw-head"><span class="pw-dot" style="background:#d93b3b"></span>
+                  <strong>Pathway 1 · Golf, ringed</strong></div>
+                <p><code>DOR 038</code>, ≥ 80% of perimeter is single-family residential.
+                   The SB 1434 <strong>overlay applies</strong>, constraining density.
+                   Less valuable for redevelopment because you inherit the overlay&#39;s density cap.</p>
+              </div>
+              <div class="pw" data-color="#ee7d3c">
+                <div class="pw-head"><span class="pw-dot" style="background:#ee7d3c"></span>
+                  <strong>Pathway 1B · Golf, partially ringed</strong></div>
+                <p><code>DOR 038</code>, 40-79% SF-residential perimeter.
+                   Overlay <em>likely</em> applies but the exact boundary computation deserves a
+                   manual review of the parcel&#39;s actual footprint before you commit.</p>
+              </div>
+              <div class="pw" data-color="#f2b731">
+                <div class="pw-head"><span class="pw-dot star" style="background:#f2b731"></span>
+                  <strong>Pathway 2 · Golf, not ringed ★</strong></div>
+                <p><code>DOR 038</code>, &lt; 40% SF-residential perimeter.
+                   Overlay does <strong>not</strong> apply — <strong>full density flexibility</strong>.
+                   These are the highest-value deals in the entire dataset. Markers are drawn
+                   30% larger and outlined heavier so they pop on the map.</p>
+              </div>
+              <div class="pw" data-color="#5b6a7e">
+                <div class="pw-head"><span class="pw-dot" style="background:#5b6a7e"></span>
+                  <strong>Pathway 3 · Industrial</strong></div>
+                <p><code>DOR 041-049</code>. Large footprints frequently sitting on documented
+                   contamination — the classic brownfield-to-mixed-use play. Environmental
+                   remediation cost is the primary underwriting question.</p>
+              </div>
+              <div class="pw" data-color="#2f6fd9">
+                <div class="pw-head"><span class="pw-dot" style="background:#2f6fd9"></span>
+                  <strong>Pathway 4 · Commercial</strong></div>
+                <p><code>DOR 011-029</code> (minus office/auto/fuel below). Strip centers, big
+                   box, regional malls sitting on or near brownfield land. Retail apocalypse
+                   supply meets residential demand.</p>
+              </div>
+              <div class="pw" data-color="#4682b4">
+                <div class="pw-head"><span class="pw-dot" style="background:#4682b4"></span>
+                  <strong>Pathway 5 · Office</strong></div>
+                <p><code>DOR 017-019</code>. Underperforming suburban office on qualifying land.
+                   Post-COVID vacancy plus SB 1434 unlock = teardown-to-rental plays.</p>
+              </div>
+              <div class="pw" data-color="#7b3f9f">
+                <div class="pw-head"><span class="pw-dot" style="background:#7b3f9f"></span>
+                  <strong>Pathway 6 · Institutional</strong></div>
+                <p><code>DOR 070-079</code> excluding government. Schools, churches, hospitals
+                   on qualifying sites. Often long-tenured owners — patient capital deals.</p>
+              </div>
+              <div class="pw" data-color="#3ea55c">
+                <div class="pw-head"><span class="pw-dot" style="background:#3ea55c"></span>
+                  <strong>Pathway 7 · Residential redevelopment</strong></div>
+                <p><code>DOR 001-009</code> on 5+ acres. Mobile-home parks and aging garden
+                   apartments where an SB 1434 unlock supports densification.</p>
+              </div>
+              <div class="pw" data-color="#8b5a2b">
+                <div class="pw-head"><span class="pw-dot" style="background:#8b5a2b"></span>
+                  <strong>Pathway 8 · Utility</strong></div>
+                <p><code>DOR 091-097</code>, or a utility owner name. <strong>15-year title
+                   lookback required</strong> before you can rely on the qualification —
+                   parcels previously owned by a public utility as defined in §366.02 are
+                   excluded by statute. Treat as a flag, not a green light.</p>
+              </div>
+              <div class="pw" data-color="#c15a12">
+                <div class="pw-head"><span class="pw-dot" style="background:#c15a12"></span>
+                  <strong>Pathway 9 · Auto/fuel</strong></div>
+                <p><code>DOR 028, 048</code>. Gas stations and auto-repair sites — near-certain
+                   petroleum-contamination signal. Cleanup cost is the deal.</p>
+              </div>
+              <div class="pw" data-color="#c62d8b">
+                <div class="pw-head"><span class="pw-dot" style="background:#c62d8b"></span>
+                  <strong>Pathway 10 · Hospitality</strong></div>
+                <p><code>DOR 039</code>. Aging hotels/motels on qualifying land — historically
+                   dry-cleaner exposure on-site, plus soft demand at older properties makes
+                   these attractive teardowns.</p>
+              </div>
+              <div class="pw" data-color="#1fa39a">
+                <div class="pw-head"><span class="pw-dot" style="background:#1fa39a"></span>
+                  <strong>Pathway 11 · Vacant commercial</strong></div>
+                <p><code>DOR 010</code>. Empty commercial parcels inside brownfield or
+                   cleanup zones — least-encumbered path to a clean start.</p>
+              </div>
+              <div class="pw" data-color="#4b3fa6">
+                <div class="pw-head"><span class="pw-dot" style="background:#4b3fa6"></span>
+                  <strong>Pathway 12 · Mixed use</strong></div>
+                <p><code>DOR 030-035</code>. Existing mixed-use sites eligible for
+                   intensification under the statute.</p>
+              </div>
+              <div class="pw" data-color="#a4abb9">
+                <div class="pw-head"><span class="pw-dot" style="background:#a4abb9"></span>
+                  <strong>Pathway 13 · Other</strong></div>
+                <p>Everything that passed all five gates but doesn&#39;t match a specific pathway
+                   bucket — worth eyeballing individually.</p>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <details class="intel-section">
+          <summary><span class="s-num">4</span> The golf-course ring test</summary>
+          <div class="intel-body">
+            <p>Golf courses split into three sub-pathways depending on their surroundings, and
+               the ring test is what decides which.</p>
+            <p>For each <code>DOR 038</code> qualifying parcel, the scanner:</p>
+            <ol>
+              <li>Approximates the parcel boundary as a circle of equivalent area
+                  (<code>r = √(acres · 4046.86 / π)</code>) — we have the centroid + acres
+                  but not the actual polygon.</li>
+              <li>Walks 12 bearings (every 30°) at a radius of the parcel + 200 ft.</li>
+              <li>At each sample point, KNN-looks up the nearest <em>other</em> parcel and
+                  checks whether its DOR use code is single-family residential (001-009).</li>
+              <li>Computes the percentage of sample bearings that hit residential and
+                  classifies:
+                  <ul>
+                    <li><strong>≥ 80% → <em>ringed</em></strong> → Pathway 1 (overlay applies).</li>
+                    <li><strong>40-79% → <em>partially_ringed</em></strong> → Pathway 1B (review).</li>
+                    <li><strong>&lt; 40% → <em>not_ringed</em></strong> → Pathway 2 (no overlay, top deals).</li>
+                  </ul>
+              </li>
+            </ol>
+            <p><strong>Why it matters:</strong> the SB 1434 overlay caps redevelopment density
+               when a course is ringed by SF residential — to protect the character of those
+               neighborhoods. When the course is <em>not</em> ringed, no overlay, so the
+               unlocked density is unconstrained. This makes not-ringed golf courses the
+               most valuable deals in the entire dataset.</p>
+            <p><strong>Per-bearing detail</strong> (bearing angle, nearest DOR code, distance to
+               that parcel) is stored in <code>ring_test_samples</code> JSONB and returned on
+               the <code>GET /qualifying-parcels/{parcel_id}</code> detail endpoint. Use it to
+               figure out which side of the course is the unringed edge.</p>
+            <p class="callout warn">
+              <strong>Caveat.</strong> The circular approximation misses course shape detail —
+              long/narrow layouts (fitting around lakes) will have samples that are inside the
+              course itself on some bearings. Anything hovering near the 40% or 80%
+              threshold deserves a visual spot-check in the aerial-view link.
+            </p>
+          </div>
+        </details>
+
+        <details class="intel-section">
+          <summary><span class="s-num">5</span> Understanding the environmental triggers</summary>
+          <div class="intel-body">
+            <p>Gate 3 is the heart of SB 1434 — the environmental trigger is what
+               distinguishes this statute from every other density unlock. Two independent
+               data sources, either one qualifies.</p>
+
+            <h3>Brownfield Area (Trigger B)</h3>
+            <p>FDEP-designated brownfield areas are <em>zones</em> where environmental cleanup
+               is occurring or planned under Ch. 376. They&#39;re relatively few (624 loaded
+               statewide) but each covers a substantial footprint. If your parcel&#39;s centroid
+               is inside any of these polygons, Trigger B is satisfied — this is the
+               cleanest possible qualification.</p>
+
+            <h3>Cleanup Site (Trigger A)</h3>
+            <p>Individual DEP contamination/cleanup site points from the DEP Contamination
+               Locator Map. 2,363 sites in the tri-county area. A parcel qualifies if its
+               centroid is within 1,500 ft of any one of these points — proximity, not
+               containment.</p>
+
+            <h3>Both</h3>
+            <p>When <code>env_trigger = both</code>, the parcel sits inside a brownfield area
+               <em>and</em> is near a cleanup site. Belt-and-suspenders qualification.</p>
+
+            <p class="callout">
+              Environmental triggers are what make SB 1434 unique. This isn&#39;t a housing
+              unlock over commercial land; it&#39;s a density unlock <em>specifically for
+              environmentally impacted land</em>. Every parcel on the map is by definition
+              contaminated or contamination-adjacent — cleanup cost is always part of the
+              underwriting.
+            </p>
+          </div>
+        </details>
+
+        <details class="intel-section">
+          <summary><span class="s-num">6</span> How to use this scanner</summary>
+          <div class="intel-body">
+            <ol class="workflow">
+              <li><strong>Start with the top deals.</strong> Set Pathway to
+                  <em>2 · Golf, not ringed ★</em>. There are currently 6 parcels in this
+                  bucket — begin your review there.</li>
+              <li><strong>Narrow to your market.</strong> Add a County filter. Miami-Dade is
+                  the deepest inventory; Broward and Palm Beach are smaller pools but often
+                  cleaner titles.</li>
+              <li><strong>Click any marker</strong> to open the detail popup. The badges at the
+                  top summarize pathway / env trigger / UDB status / ring test / adjacency /
+                  utility flag at a glance. The Google Maps aerial link opens the exact
+                  parcel in satellite view — always use it before you spend more time on a
+                  deal.</li>
+              <li><strong>For golf courses,</strong> read the ring-test percentage. Anything
+                  between 35% and 45%, or 75% and 85%, is a borderline classification —
+                  don&#39;t treat the pathway label as gospel until you&#39;ve looked at the
+                  actual boundary.</li>
+              <li><strong>For Pathway 8 (utility),</strong> stop and order a 15-year title
+                  history before proceeding. Any prior ownership by an FPL/Duke/TECO-style
+                  utility disqualifies the parcel under §163.2525(4)(e).</li>
+              <li><strong>Use the environmental-trigger filter</strong> to split brownfield-area
+                  parcels (more established cleanup programs, better-defined liability) from
+                  cleanup-site parcels (may need Phase II ESA to confirm contamination
+                  extent).</li>
+              <li><strong>For Miami-Dade,</strong> check <code>udb_status</code>. Parcels
+                  <em>outside</em> the UDB are still qualifying under SB 1434 but face
+                  additional entitlement friction — county comprehensive-plan overrides,
+                  potentially. Not a dealbreaker but a friction point to price in.</li>
+              <li><strong>Export your shortlist.</strong> Use the API directly for CSV:
+                  <code>GET /qualifying-parcels?pathway=…&amp;county=…</code>. Every field
+                  visible in a popup is in the JSON response.</li>
+            </ol>
+          </div>
+        </details>
+
+        <details class="intel-section">
+          <summary><span class="s-num">7</span> Field glossary</summary>
+          <div class="intel-body">
+            <dl class="glossary">
+              <dt>Parcel ID</dt>
+              <dd>DOR-assigned unique identifier (folio number in Miami-Dade, PCN in Palm
+                  Beach). Zero-padded to the county&#39;s canonical length.</dd>
+
+              <dt>DOR Use Code</dt>
+              <dd>Florida Department of Revenue 3-digit land-use classification. Drives every
+                  pathway assignment. Reference:
+                  <a href="https://floridarevenue.com/property/Documents/DORCodes.pdf"
+                     target="_blank" rel="noopener">DOR Use Codes PDF</a>.</dd>
+
+              <dt>Acres</dt>
+              <dd>Computed from <code>LND_SQFOOT / 43,560</code>. This is DOR&#39;s land area,
+                  not building footprint.</dd>
+
+              <dt>Pathway</dt>
+              <dd>One of 14 values (13 pathways plus <code>pathway_golf_pending</code>, the
+                  transient state before the ring test runs). See §3 above.</dd>
+
+              <dt>Environmental Trigger</dt>
+              <dd>Which Gate 3 source qualified the parcel: <code>brownfield_area</code>,
+                  <code>cleanup_site</code>, or <code>both</code>.</dd>
+
+              <dt>Brownfield Area Name</dt>
+              <dd>If <code>env_trigger</code> includes <code>brownfield_area</code>, this is the
+                  name of the FDEP area the parcel sits inside.</dd>
+
+              <dt>UDB Status</dt>
+              <dd>Miami-Dade only. <code>inside</code> / <code>outside</code> of the county&#39;s
+                  Urban Development Boundary. Non-Miami-Dade rows are always
+                  <code>null</code> — no UDB applies.</dd>
+
+              <dt>Ring Test Result</dt>
+              <dd>Golf courses only. <code>ringed</code> (≥80%) / <code>partially_ringed</code>
+                  (40-79%) / <code>not_ringed</code> (&lt;40%). Non-golf rows are
+                  <code>null</code>.</dd>
+
+              <dt>Ring Test Pct</dt>
+              <dd>The exact percentage of the 12 sample bearings that landed on
+                  SF-residential parcels.</dd>
+
+              <dt>Adjacent Residential</dt>
+              <dd><code>true</code> if any parcel with DOR 001-009 exists within 500 ft.
+                  Required to satisfy Gate 4.</dd>
+
+              <dt>Utility Flag</dt>
+              <dd><code>true</code> if the current owner name or DOR use code suggests utility
+                  ownership. Not an exclusion — requires 15-year title lookback for the final
+                  determination.</dd>
+
+              <dt>Owner Name</dt>
+              <dd>Current owner from DOR NAL. Truncated to 100 chars in the API response.</dd>
+            </dl>
+          </div>
+        </details>
+
+        <details class="intel-section">
+          <summary><span class="s-num">8</span> Data sources &amp; currency</summary>
+          <div class="intel-body">
+            <ul class="sources">
+              <li><strong>DOR NAL parcels</strong> — Florida Department of Revenue Name-Address-Legal
+                  file, 2025 vintage. 2,342,443 parcels loaded across Miami-Dade, Broward,
+                  and Palm Beach. Refresh cadence: annual (DOR publishes in Q3).</li>
+              <li><strong>Parcel centroids</strong> — FL Statewide Parcel Centroid FeatureServer
+                  (Esri Living Atlas). Joined to NAL via zero-padded parcel_id per county.
+                  Coverage is ~63-99% depending on county (loses some condo sub-units).</li>
+              <li><strong>FDEP Brownfield Areas</strong> — <a href="https://ca.dep.state.fl.us/arcgis/rest/services/OpenData/BROWNFIELD_AREAS/MapServer/0" target="_blank" rel="noopener">DEP OpenData Layer 0</a>.
+                  624 designated areas statewide (all 3 counties covered).</li>
+              <li><strong>DEP Cleanup Sites</strong> — DEP Contamination Locator Map (Environment
+                  MapServer Layer 1). 2,363 tri-county points loaded (filtered from a
+                  ~10k-statewide dataset).</li>
+              <li><strong>Miami-Dade UDB</strong> — county GIS export. Currently a
+                  polygonized-from-line approximation; may be refined against the county&#39;s
+                  authoritative polygon in a future release.</li>
+              <li><strong>Military installations</strong> — 6 tri-county installations per
+                  §163.3175(2): Homestead ARB, USSOUTHCOM Doral, USCG Base Miami Beach,
+                  USCG Sector Miami, USCG Station Fort Lauderdale, FL Army NG Homestead
+                  Armory. Point-buffered footprints; ¼-mile exclusion buffer computed at
+                  screen time via <code>ST_DWithin</code>.</li>
+            </ul>
+            <p class="callout">
+              <strong>Everything on this map is only as fresh as the last screen run.</strong>
+              When new NAL data or new brownfield/cleanup features are ingested, hit
+              <code>POST /admin/run-screening</code> to rebuild <code>qualifying_parcels</code>,
+              then <code>POST /admin/run-ring-test</code> to refresh golf classifications.
+            </p>
+          </div>
+        </details>
+      </article>
+    </div>
   </main>
 </div>
 

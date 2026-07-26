@@ -346,11 +346,43 @@
   }
 
   // ------------------------------------------------------------------
+  // View toggle (Map / Intel)
+  // ------------------------------------------------------------------
+
+  function initViewTabs() {
+    const buttons = document.querySelectorAll(".view-btn");
+    const views = {
+      map: document.getElementById("view-map"),
+      intel: document.getElementById("view-intel"),
+    };
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const target = btn.dataset.view;
+        buttons.forEach((b) => {
+          const active = b === btn;
+          b.classList.toggle("active", active);
+          b.setAttribute("aria-selected", String(active));
+        });
+        Object.entries(views).forEach(([key, el]) => {
+          if (!el) return;
+          const active = key === target;
+          el.classList.toggle("active", active);
+          el.hidden = !active;
+        });
+        // Leaflet needs to recompute its container size when the map
+        // pane comes back from display:none.
+        if (target === "map") map.invalidateSize();
+      });
+    });
+  }
+
+  // ------------------------------------------------------------------
   // Boot
   // ------------------------------------------------------------------
 
   initFilters();
   initLegend();
   initApiBadge();
+  initViewTabs();
   loadParcels();
 })();
