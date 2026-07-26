@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SB 1434 Infill Redevelopment Scanner</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <header class="sidebar-head">
+      <h1>SB 1434 Scanner</h1>
+      <p class="subtitle">
+        Section 163.2525 qualifying parcels · Miami-Dade, Broward, Palm Beach
+      </p>
+    </header>
+
+    <section class="kpis">
+      <div class="kpi">
+        <div class="kpi-num" id="kpi-count">–</div>
+        <div class="kpi-label">Qualifying parcels</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-num" id="kpi-acres">–</div>
+        <div class="kpi-label">Total acres</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-num" id="kpi-adjacent">–</div>
+        <div class="kpi-label">Residential adjacency</div>
+      </div>
+    </section>
+
+    <section class="filters">
+      <h2>Filters</h2>
+
+      <label>County
+        <select id="f-county">
+          <option value="">All</option>
+          <option value="23">Miami-Dade</option>
+          <option value="16">Broward</option>
+          <option value="60">Palm Beach</option>
+        </select>
+      </label>
+
+      <label>Pathway
+        <select id="f-pathway">
+          <option value="">All</option>
+          <option value="pathway_1_golf_ringed">1 · Golf, ringed</option>
+          <option value="pathway_1b_golf_partial">1B · Golf, partial</option>
+          <option value="pathway_2_golf_not_ringed">2 · Golf, not ringed ★</option>
+          <option value="pathway_3_industrial">3 · Industrial</option>
+          <option value="pathway_4_commercial">4 · Commercial</option>
+          <option value="pathway_5_office">5 · Office</option>
+          <option value="pathway_6_institutional">6 · Institutional</option>
+          <option value="pathway_7_residential_redev">7 · Residential redev</option>
+          <option value="pathway_8_utility">8 · Utility</option>
+          <option value="pathway_9_auto_fuel">9 · Auto/fuel</option>
+          <option value="pathway_10_hospitality">10 · Hospitality</option>
+          <option value="pathway_11_vacant_commercial">11 · Vacant commercial</option>
+          <option value="pathway_12_mixed_use">12 · Mixed use</option>
+          <option value="pathway_13_other">13 · Other</option>
+          <option value="pathway_golf_pending">Golf · ring test pending</option>
+        </select>
+      </label>
+
+      <label>Environmental trigger
+        <select id="f-env">
+          <option value="">All</option>
+          <option value="brownfield_area">Brownfield area</option>
+          <option value="cleanup_site">Cleanup site</option>
+          <option value="both">Both</option>
+        </select>
+      </label>
+
+      <label>Ring test (golf only)
+        <select id="f-ring">
+          <option value="">All</option>
+          <option value="ringed">Ringed</option>
+          <option value="partially_ringed">Partially ringed</option>
+          <option value="not_ringed">Not ringed</option>
+        </select>
+      </label>
+
+      <label>UDB status (Miami-Dade only)
+        <select id="f-udb">
+          <option value="">All</option>
+          <option value="inside">Inside</option>
+          <option value="outside">Outside</option>
+        </select>
+      </label>
+
+      <label>Min acres
+        <input id="f-min-acres" type="number" min="0" step="1" placeholder="5" />
+      </label>
+
+      <button id="f-reset" class="btn-reset" type="button">Reset filters</button>
+    </section>
+
+    <section class="legend" id="legend">
+      <div class="legend-head">
+        <h2>Pathway legend</h2>
+        <button class="legend-toggle" id="legend-toggle" type="button" aria-expanded="true">−</button>
+      </div>
+      <ul id="legend-list"></ul>
+    </section>
+
+    <footer class="sidebar-foot">
+      <span id="api-badge" class="api-badge">API: —</span>
+    </footer>
+  </aside>
+
+  <main class="main">
+    <div id="map"></div>
+    <div id="loading" class="loading hidden">
+      <div class="spinner"></div>
+      <div class="loading-text">Loading parcels…</div>
+    </div>
+    <div id="toast" class="toast hidden"></div>
+  </main>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""></script>
+<script src="./app.js"></script>
+
+</body>
+</html>

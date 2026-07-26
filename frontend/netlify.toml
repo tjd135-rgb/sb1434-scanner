@@ -1,0 +1,19 @@
+# Netlify config for the sb1434-scanner frontend.
+#
+# Zero build step — deploy the static files in frontend/ as-is. The API base
+# URL defaults to https://sb1434-scanner-api.onrender.com; override at load
+# time with ?api=https://your-service.onrender.com in the URL, or set
+# window.SB1434_API in a small inline <script> before app.js.
+#
+# On Netlify: point "Publish directory" at "frontend" (from the repo root).
+
+[build]
+  publish = "."
+  command = ""
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Content-Type-Options = "nosniff"
