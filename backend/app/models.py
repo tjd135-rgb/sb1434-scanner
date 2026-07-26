@@ -125,6 +125,54 @@ class BrownfieldSite(Base):
     )
 
 
+class UdbBoundary(Base):
+    """Miami-Dade Urban Development Boundary polygon (Phase C2).
+
+    One row per UDB polygon (typically a single row, but the model allows
+    multipart geometry as the county's file has evolved over time). Parcels
+    inside are business-as-usual; parcels outside are flagged for analyst
+    review — the UDB is not itself a statutory SB 1434 exclusion but is a
+    strong signal about developability."""
+
+    __tablename__ = "udb_boundary"
+    __table_args__ = (
+        Index("ix_udb_boundary_geom", "geom", postgresql_using="gist"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str | None] = mapped_column(String(100))
+    source: Mapped[str | None] = mapped_column(String(200))
+    geom = mapped_column(Geometry(geometry_type="MULTIPOLYGON", srid=4326))
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime, server_default=text("NOW()"), nullable=False
+    )
+
+
+class MilitaryInstallation(Base):
+    """DoD / Coast Guard installation polygons (Phase C3).
+
+    Populated from a HIFLD-style polygon feed if available, or from a
+    hardcoded tri-county fallback (buffered around installation centroids)
+    so the statutory ¼-mile exclusion still runs when no shapefile is at
+    hand. Statute (§163.2525) excludes parcels within ¼ mile of the
+    installation boundary."""
+
+    __tablename__ = "military_installations"
+    __table_args__ = (
+        Index("ix_military_installations_geom", "geom", postgresql_using="gist"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(150), nullable=False, unique=True)
+    branch: Mapped[str | None] = mapped_column(String(50))
+    state: Mapped[str | None] = mapped_column(String(2))
+    source: Mapped[str | None] = mapped_column(String(200))
+    geom = mapped_column(Geometry(geometry_type="MULTIPOLYGON", srid=4326))
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime, server_default=text("NOW()"), nullable=False
+    )
+
+
 class CleanupSite(Base):
     """DEP Contamination Locator Map (Environment/MapServer/1).
 
@@ -181,6 +229,9 @@ class QualifyingParcel(Base):
     ag_exclusion: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     park_exclusion: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     utility_flag: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # Phase C2: 'inside' / 'outside' for Miami-Dade parcels, NULL for other
+    # counties (no UDB applies). Informational — not an exclusion.
+    udb_status: Mapped[str | None] = mapped_column(String(10))
     dor_uc: Mapped[str | None] = mapped_column(String(4))
     own_name: Mapped[str | None] = mapped_column(String(100))
     pathway_hint: Mapped[str | None] = mapped_column(String(50))

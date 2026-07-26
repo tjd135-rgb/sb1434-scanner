@@ -20,10 +20,10 @@ Screening applies:
 - **Gate 4** — a residential parcel (DOR 001-009) sits within 500 ft
 - **Gate 5A** — not agricultural (DOR 050-069)
 - **Gate 5B** — not a government-owned public park (DOR 082 + govt owner)
-
-Deferred to later phases: **Gate 5C** (Urban Development Boundary),
-**Gate 5D** (¼-mile military buffer). Their columns already exist on
-`qualifying_parcels`.
+- **Gate 5C** — Miami-Dade UDB status recorded as `inside` / `outside` /
+  `NULL` (non-MD); this is a **flag**, not an exclusion
+- **Gate 5D** — parcel is NOT within ¼ mile (1,320 ft) of any military
+  installation — statutory exclusion
 
 ## Deploy to Render
 
@@ -90,10 +90,30 @@ Hit `http://localhost:8000/health` to confirm PostGIS is loaded.
 | GET | /stats | Aggregate counts by county / pathway |
 | POST | /admin/ingest-brownfields | Runs FDEP Layer 0 + Layer 1 ingest |
 | POST | /admin/ingest-cleanup-sites | Runs DEP Contamination Locator ingest (Trigger A source) |
+| POST | /admin/ingest-udb | Loads Miami-Dade UDB polygon (Phase C2) |
+| POST | /admin/ingest-military | Loads military installations (Phase C3) |
 | POST | /admin/ingest-nal | Body `{"county":"all"\|"miami-dade"\|"broward"\|"palm-beach"}` |
 | POST | /admin/ingest-centroids | Body `{"county":"all"\|"23"\|"16"\|"60"}` |
 | POST | /admin/run-screening | Runs SB 1434 screen; body `{"update_adjacency": true}` |
 | GET | /admin/status | Snapshot of in-flight/completed background jobs |
+
+### Data-source configuration (Phase C2 + C3)
+
+The UDB and military ingests each read from one of, in order:
+
+1. **Local GeoJSON** at `backend/data/udb/*.geojson` or `backend/data/military/*.geojson`
+2. **URL override** via `UDB_SOURCE_URL` / `MILITARY_SOURCE_URL` env var,
+   pointing at an ArcGIS REST FeatureServer/MapServer layer that serves
+   the polygon(s) as GeoJSON
+3. **Military only** — a hardcoded fallback set of tri-county installations
+   (Homestead ARB, USSOUTHCOM Doral, USCG Miami Beach + Ft Lauderdale, FL
+   Army NG Homestead Armory) with buffered-point footprints. Source label
+   on those rows is `fallback:hardcoded`; replace with authoritative data
+   for production use.
+
+The UDB has **no fallback** — if no source is configured the ingest errors
+out. Grab the current polygon from Miami-Dade Open Data
+(<https://gis-mdc.opendata.arcgis.com/>) once you locate it.
 
 ## Layout
 
@@ -109,9 +129,11 @@ backend/
     versions/0001_initial.py
   app/
     db.py                 # engine + session
-    models.py             # SQLAlchemy ORM (5 tables)
+    models.py             # SQLAlchemy ORM (7 tables)
     brownfields.py        # FDEP ArcGIS ingest (Gate 3 Trigger B)
     cleanup_sites.py      # DEP Contamination Locator (Gate 3 Trigger A)
+    udb.py                # Miami-Dade Urban Development Boundary (Gate 5C)
+    military.py           # Military installations (Gate 5D)
     ingest.py             # Phase A: DOR NAL loader (CLI + library)
     centroids.py          # Phase A: parcel-centroid backfill (CLI + library)
     screening.py          # SB 1434 gates as SQL

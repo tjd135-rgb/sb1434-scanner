@@ -1,9 +1,9 @@
 """SB 1434 (Section 163.2525) qualifying-parcel screen.
 
 Runs one INSERT ... SELECT that applies Gates 1, 2, 3 (both triggers), 5A,
-5B and computes every flag column + a preliminary pathway_hint. Gate 4
-(residential adjacency) is expensive on the full parcel set, so it runs as
-a follow-up UPDATE against qualifying_parcels only.
+5B, 5D and computes every flag column + a preliminary pathway_hint. Gate 4
+(residential adjacency) and Gate 5C (UDB flag) are expensive per-row
+lookups, so they run as follow-up UPDATEs against qualifying_parcels only.
 
 Gate 3 supports BOTH environmental triggers as of Phase C1:
   - Trigger B: parcel centroid inside a designated FDEP brownfield area
@@ -11,7 +11,12 @@ Gate 3 supports BOTH environmental triggers as of Phase C1:
 A parcel qualifies if EITHER trigger matches; env_trigger records which
 (brownfield_area / cleanup_site / both).
 
-Gates deferred to later phases: 5C (UDB), 5D (military).
+Phase C2 (UDB): Miami-Dade parcels get udb_status='inside'/'outside'; other
+counties get NULL. This is a FLAG, not an exclusion.
+
+Phase C3 (military): Parcels within 1/4 mile (1,320 ft) of a military
+installation are EXCLUDED from qualifying_parcels — statutory exclusion
+under §163.2525.
 """
 from __future__ import annotations
 
@@ -37,6 +42,8 @@ MIN_SQFOOT = 217_800
 ADJACENCY_METERS = 152.4
 # 1,500 feet expressed in meters — Gate 3 Trigger A cleanup-site proximity.
 CLEANUP_PROXIMITY_METERS = 457.2
+# 1,320 feet (¼ mile) in meters — Gate 5D military-installation exclusion.
+MILITARY_EXCLUSION_METERS = 402.336
 
 
 # Indexes we ensure at the top of every screen run. All are idempotent — the
@@ -57,6 +64,12 @@ _ENSURE_INDEXES = [
     "ON cleanup_sites USING GIST (geom)",
     "CREATE INDEX IF NOT EXISTS idx_cleanup_sites_geom_geog "
     "ON cleanup_sites USING GIST ((geom::geography))",
+    "CREATE INDEX IF NOT EXISTS idx_udb_boundary_geom "
+    "ON udb_boundary USING GIST (geom)",
+    "CREATE INDEX IF NOT EXISTS idx_military_installations_geom "
+    "ON military_installations USING GIST (geom)",
+    "CREATE INDEX IF NOT EXISTS idx_military_installations_geom_geog "
+    "ON military_installations USING GIST ((geom::geography))",
 ]
 
 
@@ -170,6 +183,16 @@ _INSERT_QUALIFIERS = text(
                 OR p.own_name ILIKE '%PALM BEACH%'
             )
         )
+        -- Gate 5D: exclude parcels within ¼ mile of any military installation.
+        AND NOT EXISTS (
+            SELECT 1 FROM military_installations mi
+             WHERE mi.geom IS NOT NULL
+               AND ST_DWithin(
+                     mi.geom::geography,
+                     p.geom::geography,
+                     :military_meters
+                   )
+        )
     ON CONFLICT (parcel_id) DO UPDATE SET
         county_fips = EXCLUDED.county_fips,
         acres = EXCLUDED.acres,
@@ -203,6 +226,25 @@ _UPDATE_ADJACENCY = text(
                     :radius_meters
                   )
        )
+     WHERE qp.geom IS NOT NULL
+    """
+)
+
+
+# Gate 5C. Miami-Dade only — no UDB applies elsewhere. 'inside' if any UDB
+# polygon contains the centroid; 'outside' if not; NULL for non-MD parcels.
+_UPDATE_UDB_STATUS = text(
+    """
+    UPDATE qualifying_parcels qp
+       SET udb_status = CASE
+           WHEN qp.county_fips <> '23' THEN NULL
+           WHEN EXISTS (
+               SELECT 1 FROM udb_boundary u
+                WHERE u.geom IS NOT NULL
+                  AND ST_Contains(u.geom, qp.geom)
+           ) THEN 'inside'
+           ELSE 'outside'
+       END
      WHERE qp.geom IS NOT NULL
     """
 )
@@ -246,6 +288,15 @@ _STATS_BY_TRIGGER = text(
     """
 )
 
+_STATS_BY_UDB = text(
+    """
+    SELECT udb_status, COUNT(*) AS n, COALESCE(SUM(acres), 0) AS acres
+      FROM qualifying_parcels
+     GROUP BY udb_status
+     ORDER BY n DESC
+    """
+)
+
 
 def run_screen(update_adjacency: bool = True) -> Dict[str, Any]:
     """Run the qualifying-parcel screen end-to-end and return summary stats."""
@@ -266,22 +317,40 @@ def run_screen(update_adjacency: bool = True) -> Dict[str, Any]:
             log.warning("brownfield_areas is empty; run ingest_all() first")
 
         n_cleanup = conn.execute(text("SELECT COUNT(*) FROM cleanup_sites")).scalar_one()
-        log.info("Input: %d cleanup sites", n_cleanup)
+        n_udb = conn.execute(text("SELECT COUNT(*) FROM udb_boundary")).scalar_one()
+        n_mil = conn.execute(text("SELECT COUNT(*) FROM military_installations")).scalar_one()
+        log.info(
+            "Input: %d cleanup sites, %d UDB polygons, %d military installations",
+            n_cleanup, n_udb, n_mil,
+        )
         if n_cleanup == 0:
             log.warning(
                 "cleanup_sites is empty; only brownfield-area triggers will match. "
                 "Run ingest-cleanup-sites for full Gate 3 coverage."
             )
+        if n_mil == 0:
+            log.warning(
+                "military_installations is empty; Gate 5D exclusion won't remove anything. "
+                "Run ingest-military first."
+            )
+        if n_udb == 0:
+            log.warning(
+                "udb_boundary is empty; udb_status will remain NULL for all Miami-Dade rows. "
+                "Run ingest-udb to populate."
+            )
 
         log.info(
-            "Applying Gates 1, 2, 3 (brownfield OR cleanup within %.1fm), 5A, 5B (INSERT ... SELECT)",
+            "Applying Gates 1, 2, 3 (brownfield OR cleanup within %.1fm), 5A, 5B, "
+            "5D (military exclusion at %.1fm) (INSERT ... SELECT)",
             CLEANUP_PROXIMITY_METERS,
+            MILITARY_EXCLUSION_METERS,
         )
         result = conn.execute(
             _INSERT_QUALIFIERS,
             {
                 "min_sqfoot": MIN_SQFOOT,
                 "cleanup_radius_meters": CLEANUP_PROXIMITY_METERS,
+                "military_meters": MILITARY_EXCLUSION_METERS,
             },
         )
         log.info("Screen touched %s rows", result.rowcount)
@@ -290,6 +359,10 @@ def run_screen(update_adjacency: bool = True) -> Dict[str, Any]:
             log.info("Computing Gate 4 (residential adjacency, 500ft)")
             adj = conn.execute(_UPDATE_ADJACENCY, {"radius_meters": ADJACENCY_METERS})
             log.info("Adjacency updated on %s qualifying parcels", adj.rowcount)
+
+        log.info("Computing Gate 5C (UDB flag, Miami-Dade only)")
+        udb_res = conn.execute(_UPDATE_UDB_STATUS)
+        log.info("UDB status updated on %s qualifying parcels", udb_res.rowcount)
 
     return summary()
 
@@ -301,6 +374,7 @@ def summary() -> Dict[str, Any]:
         by_county = [dict(r) for r in conn.execute(_STATS_BY_COUNTY).mappings()]
         by_pathway = [dict(r) for r in conn.execute(_STATS_BY_PATHWAY).mappings()]
         by_trigger = [dict(r) for r in conn.execute(_STATS_BY_TRIGGER).mappings()]
+        by_udb = [dict(r) for r in conn.execute(_STATS_BY_UDB).mappings()]
 
     out: Dict[str, Any] = {
         "total_qualifying": int(totals["total"]),
@@ -318,6 +392,10 @@ def summary() -> Dict[str, Any]:
         "by_env_trigger": [
             {"env_trigger": r["env_trigger"], "n": int(r["n"]), "acres": float(r["acres"])}
             for r in by_trigger
+        ],
+        "by_udb_status": [
+            {"udb_status": r["udb_status"], "n": int(r["n"]), "acres": float(r["acres"])}
+            for r in by_udb
         ],
     }
     log.info(

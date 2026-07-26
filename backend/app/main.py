@@ -11,6 +11,8 @@ Endpoints:
 - POST /admin/ingest-nal               (Phase A: NAL parcel ingest)
 - POST /admin/ingest-centroids         (Phase A: parcel-centroid backfill)
 - POST /admin/ingest-cleanup-sites     (Phase C1: DEP contamination locator)
+- POST /admin/ingest-udb               (Phase C2: Miami-Dade UDB polygon)
+- POST /admin/ingest-military          (Phase C3: military installations)
 - POST /admin/run-screening            (SB 1434 screen)
 - GET  /admin/status                   (which long-running jobs are active)
 """
@@ -33,7 +35,9 @@ from . import brownfields as bf
 from . import centroids as cent
 from . import cleanup_sites as cs
 from . import ingest as nal
+from . import military as mil
 from . import screening as scr
+from . import udb as udb_mod
 from .db import engine, get_db
 
 log = logging.getLogger("sb1434")
@@ -145,7 +149,7 @@ def get_brownfield_area(area_id: str, db: Session = Depends(get_db)) -> Dict[str
 _QP_COLS = (
     "parcel_id, county_fips, acres, env_trigger, brownfield_area_id, "
     "brownfield_area_name, adjacent_residential, ag_exclusion, park_exclusion, "
-    "utility_flag, dor_uc, own_name, pathway_hint, latitude, longitude"
+    "utility_flag, udb_status, dor_uc, own_name, pathway_hint, latitude, longitude"
 )
 
 
@@ -161,6 +165,9 @@ def list_qualifying_parcels(
     min_acres: float = Query(5.0, ge=0),
     adjacent_only: bool = Query(
         False, description="If true, restrict to parcels that pass Gate 4"
+    ),
+    udb_status: Optional[str] = Query(
+        None, description="'inside' or 'outside' (Miami-Dade only)"
     ),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
@@ -184,6 +191,11 @@ def list_qualifying_parcels(
         params["et"] = env_trigger
     if adjacent_only:
         where.append("adjacent_residential = true")
+    if udb_status is not None:
+        if udb_status not in ("inside", "outside"):
+            raise HTTPException(status_code=400, detail="udb_status must be 'inside' or 'outside'")
+        where.append("udb_status = :udb")
+        params["udb"] = udb_status
 
     sql = (
         f"SELECT {_QP_COLS} FROM qualifying_parcels "
@@ -221,11 +233,15 @@ def stats() -> Dict[str, Any]:
         n_sites = conn.execute(text("SELECT COUNT(*) FROM brownfield_sites")).scalar_one()
         n_parcels = conn.execute(text("SELECT COUNT(*) FROM parcels")).scalar_one()
         n_cleanup = conn.execute(text("SELECT COUNT(*) FROM cleanup_sites")).scalar_one()
+        n_udb = conn.execute(text("SELECT COUNT(*) FROM udb_boundary")).scalar_one()
+        n_mil = conn.execute(text("SELECT COUNT(*) FROM military_installations")).scalar_one()
     summary["source_counts"] = {
         "parcels": int(n_parcels),
         "brownfield_areas": int(n_areas),
         "brownfield_sites": int(n_sites),
         "cleanup_sites": int(n_cleanup),
+        "udb_boundary": int(n_udb),
+        "military_installations": int(n_mil),
     }
     return summary
 
@@ -315,6 +331,21 @@ def admin_ingest_cleanup_sites() -> Dict[str, Any]:
     """Kick off DEP Contamination Locator ingest (Phase C1) in a background
     thread. ~10K point features statewide, tri-county filtered."""
     return _start_job("ingest-cleanup-sites", cs.ingest_all)
+
+
+@app.post("/admin/ingest-udb")
+def admin_ingest_udb() -> Dict[str, Any]:
+    """Kick off Miami-Dade Urban Development Boundary ingest (Phase C2).
+    Reads from data/udb/*.geojson if present, else UDB_SOURCE_URL, else fails."""
+    return _start_job("ingest-udb", udb_mod.ingest)
+
+
+@app.post("/admin/ingest-military")
+def admin_ingest_military() -> Dict[str, Any]:
+    """Kick off military-installations ingest (Phase C3). Reads from
+    data/military/*.geojson if present, else MILITARY_SOURCE_URL, else falls
+    back to a hardcoded set of tri-county installations."""
+    return _start_job("ingest-military", mil.ingest)
 
 
 @app.post("/admin/ingest-nal")
