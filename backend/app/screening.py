@@ -1,12 +1,17 @@
 """SB 1434 (Section 163.2525) qualifying-parcel screen.
 
-Runs one INSERT ... SELECT that applies Gates 1, 2, 3B, 5A, 5B and computes
-every flag column + a preliminary pathway_hint. Gate 4 (residential adjacency)
-is expensive on the full parcel set, so it runs as a follow-up UPDATE against
-qualifying_parcels only.
+Runs one INSERT ... SELECT that applies Gates 1, 2, 3 (both triggers), 5A,
+5B and computes every flag column + a preliminary pathway_hint. Gate 4
+(residential adjacency) is expensive on the full parcel set, so it runs as
+a follow-up UPDATE against qualifying_parcels only.
 
-Gates deferred to Phase C: 5C (UDB), 5D (military), Trigger A (cleanup-site
-proximity). Their columns exist on qualifying_parcels but are populated later.
+Gate 3 supports BOTH environmental triggers as of Phase C1:
+  - Trigger B: parcel centroid inside a designated FDEP brownfield area
+  - Trigger A: parcel centroid within 1,500 ft of a DEP cleanup site point
+A parcel qualifies if EITHER trigger matches; env_trigger records which
+(brownfield_area / cleanup_site / both).
+
+Gates deferred to later phases: 5C (UDB), 5D (military).
 """
 from __future__ import annotations
 
@@ -28,16 +33,19 @@ if not log.handlers:
 # 5 acres = 217,800 sqft
 MIN_SQFOOT = 217_800
 
-# 500 feet expressed in meters, used by ST_DWithin's geography path.
+# 500 feet expressed in meters — Gate 4 residential adjacency.
 ADJACENCY_METERS = 152.4
+# 1,500 feet expressed in meters — Gate 3 Trigger A cleanup-site proximity.
+CLEANUP_PROXIMITY_METERS = 457.2
 
 
 # Indexes we ensure at the top of every screen run. All are idempotent — the
-# alembic migration also creates equivalent indexes, but production has been
-# observed running without them (Gate 4's ST_DWithin on ~2M parcels timed
-# out) so we belt-and-suspenders it here. The critical one is the functional
-# geography index: the Gate 4 query casts `geom::geography` on both sides,
-# and the plain GIST on `geom` is not usable through that cast.
+# alembic migrations also create equivalent indexes, but we belt-and-suspenders
+# them here because production has been observed running without them
+# (Gate 4's ST_DWithin on ~2M parcels timed out until the functional
+# geography index went in). The critical ones are the functional geography
+# indexes: every proximity check casts `geom::geography`, and the plain
+# GIST on `geom` is not usable through that cast.
 _ENSURE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_parcels_centroid "
     "ON parcels USING GIST (geom)",
@@ -45,6 +53,10 @@ _ENSURE_INDEXES = [
     "ON parcels USING GIST ((geom::geography))",
     "CREATE INDEX IF NOT EXISTS idx_parcels_dor_uc "
     "ON parcels (dor_uc)",
+    "CREATE INDEX IF NOT EXISTS idx_cleanup_sites_geom "
+    "ON cleanup_sites USING GIST (geom)",
+    "CREATE INDEX IF NOT EXISTS idx_cleanup_sites_geom_geog "
+    "ON cleanup_sites USING GIST ((geom::geography))",
 ]
 
 
@@ -72,9 +84,14 @@ _INSERT_QUALIFIERS = text(
         p.county_fips,
         p.lnd_sqfoot / 43560.0 AS acres,
 
-        -- Gate 3B satisfied; Trigger A (cleanup-site proximity) is Phase C.
-        'brownfield_area' AS env_trigger,
-        ba.area_id  AS brownfield_area_id,
+        -- Gate 3 trigger classification. A parcel is here because ba OR cs
+        -- matched; label which.
+        CASE
+            WHEN ba.area_id IS NOT NULL AND cs.site_id IS NOT NULL THEN 'both'
+            WHEN ba.area_id IS NOT NULL                             THEN 'brownfield_area'
+            ELSE 'cleanup_site'
+        END AS env_trigger,
+        ba.area_id   AS brownfield_area_id,
         ba.area_name AS brownfield_area_name,
 
         -- Exclusion flags. Ag / park exclusions filter in the WHERE, so these
@@ -118,12 +135,32 @@ _INSERT_QUALIFIERS = text(
         ST_X(p.geom) AS longitude,
         p.geom
     FROM parcels p
-    JOIN brownfield_areas ba
-        ON ST_Contains(ba.geom, p.geom)
+    -- LATERAL LIMIT-1 lookups so each trigger short-circuits at the first
+    -- match rather than exploding the row-count via multi-match joins. Both
+    -- lookups produce at most one row per parcel; either can be NULL.
+    LEFT JOIN LATERAL (
+        SELECT area_id, area_name
+          FROM brownfield_areas
+         WHERE ST_Contains(geom, p.geom)
+         LIMIT 1
+    ) ba ON true
+    LEFT JOIN LATERAL (
+        SELECT site_id
+          FROM cleanup_sites
+         WHERE geom IS NOT NULL
+           AND ST_DWithin(
+                 geom::geography,
+                 p.geom::geography,
+                 :cleanup_radius_meters
+               )
+         LIMIT 1
+    ) cs ON true
     WHERE
         p.lnd_sqfoot >= :min_sqfoot
         AND p.county_fips IN ('23','16','60')
         AND p.geom IS NOT NULL
+        -- Gate 3: at least one environmental trigger present.
+        AND (ba.area_id IS NOT NULL OR cs.site_id IS NOT NULL)
         AND NOT (p.dor_uc BETWEEN '050' AND '069')
         AND NOT (
             p.dor_uc = '082' AND (
@@ -200,6 +237,15 @@ _STATS_BY_PATHWAY = text(
     """
 )
 
+_STATS_BY_TRIGGER = text(
+    """
+    SELECT env_trigger, COUNT(*) AS n, COALESCE(SUM(acres), 0) AS acres
+      FROM qualifying_parcels
+     GROUP BY env_trigger
+     ORDER BY n DESC
+    """
+)
+
 
 def run_screen(update_adjacency: bool = True) -> Dict[str, Any]:
     """Run the qualifying-parcel screen end-to-end and return summary stats."""
@@ -219,8 +265,25 @@ def run_screen(update_adjacency: bool = True) -> Dict[str, Any]:
         if n_areas == 0:
             log.warning("brownfield_areas is empty; run ingest_all() first")
 
-        log.info("Applying Gates 1, 2, 3B, 5A, 5B (INSERT ... SELECT)")
-        result = conn.execute(_INSERT_QUALIFIERS, {"min_sqfoot": MIN_SQFOOT})
+        n_cleanup = conn.execute(text("SELECT COUNT(*) FROM cleanup_sites")).scalar_one()
+        log.info("Input: %d cleanup sites", n_cleanup)
+        if n_cleanup == 0:
+            log.warning(
+                "cleanup_sites is empty; only brownfield-area triggers will match. "
+                "Run ingest-cleanup-sites for full Gate 3 coverage."
+            )
+
+        log.info(
+            "Applying Gates 1, 2, 3 (brownfield OR cleanup within %.1fm), 5A, 5B (INSERT ... SELECT)",
+            CLEANUP_PROXIMITY_METERS,
+        )
+        result = conn.execute(
+            _INSERT_QUALIFIERS,
+            {
+                "min_sqfoot": MIN_SQFOOT,
+                "cleanup_radius_meters": CLEANUP_PROXIMITY_METERS,
+            },
+        )
         log.info("Screen touched %s rows", result.rowcount)
 
         if update_adjacency:
@@ -237,6 +300,7 @@ def summary() -> Dict[str, Any]:
         totals = conn.execute(_STATS_SQL).mappings().one()
         by_county = [dict(r) for r in conn.execute(_STATS_BY_COUNTY).mappings()]
         by_pathway = [dict(r) for r in conn.execute(_STATS_BY_PATHWAY).mappings()]
+        by_trigger = [dict(r) for r in conn.execute(_STATS_BY_TRIGGER).mappings()]
 
     out: Dict[str, Any] = {
         "total_qualifying": int(totals["total"]),
@@ -250,6 +314,10 @@ def summary() -> Dict[str, Any]:
         "by_pathway": [
             {"pathway": r["pathway_hint"], "n": int(r["n"]), "acres": float(r["acres"])}
             for r in by_pathway
+        ],
+        "by_env_trigger": [
+            {"env_trigger": r["env_trigger"], "n": int(r["n"]), "acres": float(r["acres"])}
+            for r in by_trigger
         ],
     }
     log.info(

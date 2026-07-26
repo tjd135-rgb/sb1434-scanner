@@ -13,14 +13,17 @@ Backend: FastAPI + PostgreSQL/PostGIS. Deploys to Render via `backend/render.yam
 Screening applies:
 - **Gate 1** — parcel is ≥ 5 acres
 - **Gate 2** — county is 23 / 16 / 60
-- **Gate 3B** — parcel centroid lies inside a designated FDEP brownfield area
+- **Gate 3** — either **Trigger B** (centroid inside a designated FDEP
+  brownfield area) OR **Trigger A** (centroid within 1,500 ft of a DEP
+  cleanup site point). `env_trigger` records which matched:
+  `brownfield_area`, `cleanup_site`, or `both`.
 - **Gate 4** — a residential parcel (DOR 001-009) sits within 500 ft
 - **Gate 5A** — not agricultural (DOR 050-069)
 - **Gate 5B** — not a government-owned public park (DOR 082 + govt owner)
 
-Deferred to Phase C: **Trigger A** (DEP cleanup-site proximity), **Gate 5C**
-(Urban Development Boundary), **Gate 5D** (¼-mile military buffer). Their
-columns already exist on `qualifying_parcels`.
+Deferred to later phases: **Gate 5C** (Urban Development Boundary),
+**Gate 5D** (¼-mile military buffer). Their columns already exist on
+`qualifying_parcels`.
 
 ## Deploy to Render
 
@@ -86,6 +89,7 @@ Hit `http://localhost:8000/health` to confirm PostGIS is loaded.
 | GET | /qualifying-parcels/{parcel_id} | Detail |
 | GET | /stats | Aggregate counts by county / pathway |
 | POST | /admin/ingest-brownfields | Runs FDEP Layer 0 + Layer 1 ingest |
+| POST | /admin/ingest-cleanup-sites | Runs DEP Contamination Locator ingest (Trigger A source) |
 | POST | /admin/ingest-nal | Body `{"county":"all"\|"miami-dade"\|"broward"\|"palm-beach"}` |
 | POST | /admin/ingest-centroids | Body `{"county":"all"\|"23"\|"16"\|"60"}` |
 | POST | /admin/run-screening | Runs SB 1434 screen; body `{"update_adjacency": true}` |
@@ -105,8 +109,9 @@ backend/
     versions/0001_initial.py
   app/
     db.py                 # engine + session
-    models.py             # SQLAlchemy ORM (4 tables)
-    brownfields.py        # FDEP ArcGIS ingest
+    models.py             # SQLAlchemy ORM (5 tables)
+    brownfields.py        # FDEP ArcGIS ingest (Gate 3 Trigger B)
+    cleanup_sites.py      # DEP Contamination Locator (Gate 3 Trigger A)
     ingest.py             # Phase A: DOR NAL loader (CLI + library)
     centroids.py          # Phase A: parcel-centroid backfill (CLI + library)
     screening.py          # SB 1434 gates as SQL

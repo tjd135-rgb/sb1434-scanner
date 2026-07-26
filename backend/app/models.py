@@ -1,10 +1,12 @@
 """SQLAlchemy ORM models for SB 1434 scanner.
 
-Four tables:
+Five tables:
 - parcels: DOR NAL rows for Miami-Dade / Broward / Palm Beach (populated in
   Phase A; scaffolded here so alembic and the screening query stay coherent).
 - brownfield_areas: FDEP Layer 0 designated brownfield-area polygons.
 - brownfield_sites: FDEP Layer 1 individual site polygons.
+- cleanup_sites: DEP Contamination Locator Map point features (Phase C1) —
+  second environmental trigger for parcels near documented contamination.
 - qualifying_parcels: output of the Section 163.2525 screening query — the
   parcels that survive all statutory gates.
 """
@@ -27,6 +29,7 @@ from sqlalchemy import (
     Text,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -117,6 +120,37 @@ class BrownfieldSite(Base):
     status: Mapped[str | None] = mapped_column(String(50))
     contaminants: Mapped[str | None] = mapped_column(Text)
     geom = mapped_column(Geometry(geometry_type="MULTIPOLYGON", srid=4326))
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime, server_default=text("NOW()"), nullable=False
+    )
+
+
+class CleanupSite(Base):
+    """DEP Contamination Locator Map (Environment/MapServer/1).
+
+    Point features (~10K statewide) representing documented contamination /
+    cleanup sites. Screening treats a parcel as environmentally triggered if
+    its centroid lies within 1,500 ft of any cleanup site — the second half
+    of the SB 1434 Gate 3 (Trigger A in the memos)."""
+
+    __tablename__ = "cleanup_sites"
+    __table_args__ = (
+        Index("ix_cleanup_sites_geom", "geom", postgresql_using="gist"),
+        Index("ix_cleanup_sites_county", "county"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    site_id: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    site_name: Mapped[str | None] = mapped_column(String(200))
+    site_status: Mapped[str | None] = mapped_column(String(80))
+    county: Mapped[str | None] = mapped_column(String(30))
+    address: Mapped[str | None] = mapped_column(String(200))
+    city: Mapped[str | None] = mapped_column(String(80))
+    zip: Mapped[str | None] = mapped_column(String(15))
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
+    geom = mapped_column(Geometry(geometry_type="POINT", srid=4326))
+    raw_json = mapped_column(JSONB)
     created_at: Mapped[DateTime] = mapped_column(
         DateTime, server_default=text("NOW()"), nullable=False
     )

@@ -10,6 +10,7 @@ Endpoints:
 - POST /admin/ingest-brownfields       (FDEP ingest)
 - POST /admin/ingest-nal               (Phase A: NAL parcel ingest)
 - POST /admin/ingest-centroids         (Phase A: parcel-centroid backfill)
+- POST /admin/ingest-cleanup-sites     (Phase C1: DEP contamination locator)
 - POST /admin/run-screening            (SB 1434 screen)
 - GET  /admin/status                   (which long-running jobs are active)
 """
@@ -30,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from . import brownfields as bf
 from . import centroids as cent
+from . import cleanup_sites as cs
 from . import ingest as nal
 from . import screening as scr
 from .db import engine, get_db
@@ -154,7 +156,7 @@ def list_qualifying_parcels(
     ),
     pathway: Optional[str] = Query(None, description="pathway_hint value"),
     env_trigger: Optional[str] = Query(
-        None, description="'brownfield_area', 'cleanup_proximity', 'both'"
+        None, description="'brownfield_area', 'cleanup_site', or 'both'"
     ),
     min_acres: float = Query(5.0, ge=0),
     adjacent_only: bool = Query(
@@ -218,10 +220,12 @@ def stats() -> Dict[str, Any]:
         n_areas = conn.execute(text("SELECT COUNT(*) FROM brownfield_areas")).scalar_one()
         n_sites = conn.execute(text("SELECT COUNT(*) FROM brownfield_sites")).scalar_one()
         n_parcels = conn.execute(text("SELECT COUNT(*) FROM parcels")).scalar_one()
+        n_cleanup = conn.execute(text("SELECT COUNT(*) FROM cleanup_sites")).scalar_one()
     summary["source_counts"] = {
         "parcels": int(n_parcels),
         "brownfield_areas": int(n_areas),
         "brownfield_sites": int(n_sites),
+        "cleanup_sites": int(n_cleanup),
     }
     return summary
 
@@ -304,6 +308,13 @@ def admin_status() -> Dict[str, Any]:
 def admin_ingest_brownfields() -> Dict[str, Any]:
     """Kick off FDEP ingest in a background thread. Poll /admin/status."""
     return _start_job("ingest-brownfields", bf.ingest_all)
+
+
+@app.post("/admin/ingest-cleanup-sites")
+def admin_ingest_cleanup_sites() -> Dict[str, Any]:
+    """Kick off DEP Contamination Locator ingest (Phase C1) in a background
+    thread. ~10K point features statewide, tri-county filtered."""
+    return _start_job("ingest-cleanup-sites", cs.ingest_all)
 
 
 @app.post("/admin/ingest-nal")
