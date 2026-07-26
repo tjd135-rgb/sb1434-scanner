@@ -18,13 +18,24 @@
 <div class="app">
   <aside class="sidebar" id="sidebar">
     <header class="sidebar-head">
-      <h1>SB 1434 Scanner</h1>
+      <div class="sidebar-head-row">
+        <h1>SB 1434 Scanner</h1>
+        <button id="learn-link" class="learn-link" type="button"
+                title="Read the Intel tab for a full walkthrough">
+          Learn how this works →
+        </button>
+      </div>
       <p class="subtitle">
         Section 163.2525 qualifying parcels · Miami-Dade, Broward, Palm Beach
       </p>
     </header>
 
-    <section class="kpis">
+    <section class="search">
+      <input id="f-search" type="search" placeholder="Search parcel ID or owner name…" autocomplete="off" />
+      <button id="f-search-clear" class="search-clear" type="button" title="Clear search" hidden>×</button>
+    </section>
+
+    <section class="kpis kpis-4">
       <div class="kpi">
         <div class="kpi-num" id="kpi-count">–</div>
         <div class="kpi-label">Qualifying parcels</div>
@@ -36,6 +47,10 @@
       <div class="kpi">
         <div class="kpi-num" id="kpi-adjacent">–</div>
         <div class="kpi-label">Residential adjacency</div>
+      </div>
+      <div class="kpi kpi-gold">
+        <div class="kpi-num" id="kpi-golf">–</div>
+        <div class="kpi-label">Golf opportunities ★</div>
       </div>
     </section>
 
@@ -72,45 +87,37 @@
         </select>
       </label>
 
-      <label>Environmental trigger
+      <label>Environmental qualification
         <select id="f-env">
           <option value="">All</option>
-          <option value="brownfield_area">Brownfield area</option>
-          <option value="cleanup_site">Cleanup site</option>
-          <option value="both">Both</option>
+          <option value="brownfield_area">Inside brownfield area</option>
+          <option value="cleanup_site">Near cleanup site</option>
+          <option value="both">Both triggers</option>
         </select>
       </label>
 
-      <label>Ring test (golf only)
+      <label>Golf course ring test
         <select id="f-ring">
           <option value="">All</option>
-          <option value="ringed">Ringed</option>
-          <option value="partially_ringed">Partially ringed</option>
-          <option value="not_ringed">Not ringed</option>
+          <option value="ringed">Ringed (overlay applies)</option>
+          <option value="partially_ringed">Partially ringed (review)</option>
+          <option value="not_ringed">Not ringed (top deals)</option>
         </select>
       </label>
 
-      <label>UDB status (Miami-Dade only)
+      <label>Urban Development Boundary (MDC)
         <select id="f-udb">
           <option value="">All</option>
-          <option value="inside">Inside</option>
-          <option value="outside">Outside</option>
+          <option value="inside">Inside UDB</option>
+          <option value="outside">Outside UDB</option>
         </select>
       </label>
 
-      <label>Min acres
+      <label>Minimum acres
         <input id="f-min-acres" type="number" min="0" step="1" placeholder="5" />
       </label>
 
       <button id="f-reset" class="btn-reset" type="button">Reset filters</button>
-    </section>
-
-    <section class="legend" id="legend">
-      <div class="legend-head">
-        <h2>Pathway legend</h2>
-        <button class="legend-toggle" id="legend-toggle" type="button" aria-expanded="true">−</button>
-      </div>
-      <ul id="legend-list"></ul>
     </section>
 
     <footer class="sidebar-foot">
@@ -139,6 +146,21 @@
     </div>
 
     <div id="view-map" class="view active">
+      <div id="welcome-banner" class="welcome-banner" hidden>
+        <div class="welcome-body">
+          <strong>Welcome.</strong>
+          This scanner identifies parcels in Miami-Dade, Broward, and Palm Beach
+          counties that qualify for redevelopment under Florida&#39;s
+          <strong>SB 1434</strong> (Infill Redevelopment Act). Each dot is a
+          <strong>5+ acre parcel</strong> on or near environmentally impacted
+          land that meets all five statutory qualification tests.
+          <span class="welcome-tip"><span class="gold-star">★</span> Gold markers are the
+          highest-value golf-course opportunities.</span>
+          Click any parcel for details, or open the
+          <a href="#" id="welcome-intel-link">Intel tab</a> for the full explanation.
+        </div>
+        <button id="welcome-dismiss" class="welcome-dismiss" type="button">Got it</button>
+      </div>
       <div id="map"></div>
       <div id="loading" class="loading hidden">
         <div class="spinner"></div>
@@ -176,7 +198,7 @@
           </div>
         </details>
 
-        <details class="intel-section" open>
+        <details class="intel-section">
           <summary><span class="s-num">2</span> What makes a parcel qualify?</summary>
           <div class="intel-body">
             <p>A parcel must pass <strong>all five</strong> gates below to appear on the map.</p>
@@ -227,7 +249,7 @@
           </div>
         </details>
 
-        <details class="intel-section" open>
+        <details class="intel-section">
           <summary><span class="s-num">3</span> Understanding the 13 pathways</summary>
           <div class="intel-body">
             <p>Every qualifying parcel is classified into one of 13 redevelopment pathways based
@@ -406,7 +428,7 @@
           </div>
         </details>
 
-        <details class="intel-section">
+        <details class="intel-section" open>
           <summary><span class="s-num">6</span> How to use this scanner</summary>
           <div class="intel-body">
             <ol class="workflow">

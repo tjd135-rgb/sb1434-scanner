@@ -48,6 +48,12 @@ html, body {
   border-bottom: 1px solid var(--sidebar-border);
   background: var(--sidebar-bg-2);
 }
+.sidebar-head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
 .sidebar-head h1 {
   margin: 0;
   font-size: 18px;
@@ -59,6 +65,60 @@ html, body {
   color: var(--sidebar-muted);
   line-height: 1.4;
 }
+.learn-link {
+  background: transparent;
+  border: 1px solid var(--sidebar-border);
+  color: var(--accent);
+  font-size: 10.5px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.learn-link:hover {
+  background: var(--sidebar-bg);
+  border-color: var(--accent);
+}
+
+/* ---------- Sidebar search ---------- */
+
+.search {
+  position: relative;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--sidebar-border);
+}
+.search input {
+  width: 100%;
+  padding: 8px 28px 8px 10px;
+  background: var(--sidebar-bg-2);
+  color: var(--sidebar-fg);
+  border: 1px solid var(--sidebar-border);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.search input::placeholder { color: #6b7385; }
+.search input:focus {
+  outline: none;
+  border-color: var(--accent-2);
+}
+.search-clear {
+  position: absolute;
+  right: 26px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--sidebar-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.search-clear:hover { color: var(--accent); }
+.search-clear[hidden] { display: none; }
 
 .kpis {
   display: grid;
@@ -66,6 +126,9 @@ html, body {
   gap: 1px;
   background: var(--sidebar-border);
   border-bottom: 1px solid var(--sidebar-border);
+}
+.kpis.kpis-4 {
+  grid-template-columns: 1fr 1fr;
 }
 .kpi {
   background: var(--sidebar-bg);
@@ -75,8 +138,15 @@ html, body {
 .kpi-num {
   font-size: 18px;
   font-weight: 600;
-  color: var(--accent);
+  color: #dfe4ef;
   line-height: 1.1;
+}
+.kpi-gold .kpi-num,
+.kpi:first-child .kpi-num {
+  color: var(--accent);
+}
+.kpi-gold {
+  background: linear-gradient(180deg, #23282f 0%, #1b1f27 100%);
 }
 .kpi-label {
   font-size: 10px;
@@ -253,6 +323,108 @@ html, body {
   inset: 0;
 }
 
+/* ---------- Welcome banner (map view, dismissible) ---------- */
+
+.welcome-banner {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  background: #fffbec;
+  border: 1px solid #f2b731;
+  border-left: 4px solid #f2b731;
+  border-radius: 5px;
+  padding: 12px 14px 12px 16px;
+  z-index: 1000;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.10);
+  font-size: 13px;
+  line-height: 1.5;
+  color: #402b06;
+  max-width: 920px;
+}
+.welcome-banner[hidden] { display: none !important; }
+.welcome-body { flex: 1; }
+.welcome-body a { color: var(--accent-2); text-decoration: none; font-weight: 600; }
+.welcome-body a:hover { text-decoration: underline; }
+.welcome-tip { display: inline-block; margin: 0 2px; }
+.gold-star { color: #d17a00; }
+.welcome-dismiss {
+  background: var(--sidebar-bg);
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.welcome-dismiss:hover { background: var(--accent-2); }
+
+/* ---------- Floating map legend (Leaflet control) ---------- */
+
+.map-legend {
+  background: rgba(27, 31, 39, 0.94);
+  color: var(--sidebar-fg);
+  border-radius: 6px;
+  padding: 0;
+  min-width: 180px;
+  max-width: 220px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  font-family: var(--font-sans);
+  overflow: hidden;
+}
+.map-legend-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 10px;
+  background: rgba(0,0,0,0.25);
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--sidebar-muted);
+}
+.map-legend-head span:first-child { color: var(--sidebar-fg); }
+.map-legend-caret { transition: transform 0.15s ease; }
+.map-legend.collapsed .map-legend-caret { transform: rotate(-90deg); }
+.map-legend-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 10px 8px;
+  font-size: 11.5px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.map-legend.collapsed .map-legend-list { display: none; }
+.map-legend-list li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 0;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.map-legend-list li:hover { color: var(--accent); }
+.map-legend-list .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.35);
+  flex-shrink: 0;
+}
+.map-legend-list .swatch.star {
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
 /* ---------- List view ---------- */
 
 .list-view {
@@ -377,7 +549,24 @@ html, body {
 .card-why li.r-ok { color: #2a2f3a; }
 .card-why li.r-warn { color: #a4570a; }
 .card-why li.r-warn::marker { color: #d78200; }
-.card-why li.r-info { color: #2a2f3a; }
+.card-why li.r-info { color: #24405f; }
+/* Neutral data-quality note (used for the "no residential neighbor detected"
+   case). Not orange — it's a caveat, not a disqualification. */
+.card-why li.r-note {
+  color: #24405f;
+  list-style: none;
+  padding: 4px 8px;
+  background: #eaf2fb;
+  border-left: 3px solid #4ea1ff;
+  border-radius: 0 3px 3px 0;
+  margin: 4px 0 4px -14px;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.card-id .no-addr {
+  color: #8a92a2;
+  font-style: italic;
+}
 
 .card-angle {
   margin: 8px 0 10px;
@@ -696,17 +885,117 @@ html, body {
 }
 .popup dt { color: #6a7286; }
 .popup dd { margin: 0; color: #1b1f27; }
+.popup .no-addr {
+  color: #8a92a2;
+  font-style: italic;
+}
+.popup .parcel-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0 8px;
+}
+.popup .parcel-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: #eef1f7;
+  border: 1px solid #dde1eb;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: #1b1f27;
+}
+.copy-btn {
+  border: 1px solid #dde1eb;
+  background: #fff;
+  color: #4a5468;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.copy-btn:hover { background: #eef1f7; border-color: #b8c1d3; }
+.copy-btn.copied { background: #dff5e3; border-color: #7cc487; color: #14602a; }
+
+.popup .section-h {
+  display: block;
+  font-size: 10px;
+  color: #6a7286;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin: 8px 0 4px;
+}
+.popup .why ul,
+.popup .steps ul {
+  padding-left: 16px;
+  margin: 0 0 4px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.popup .why li,
+.popup .steps li { margin: 2px 0; color: #2a2f3a; }
+/* Gate 4 "not detected" is a data-quality note, not a warning. */
+.popup .why li.r-info,
+.card-why li.r-info { color: #24405f; }
+.popup .why li.r-note,
+.card-why li.r-note {
+  color: #24405f;
+  list-style: none;
+  padding: 4px 8px;
+  background: #eaf2fb;
+  border-left: 3px solid #4ea1ff;
+  border-radius: 0 3px 3px 0;
+  margin: 4px 0 4px -14px;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.popup .angle {
+  background: #f7f9fd;
+  border: 1px solid #e0e4ec;
+  border-radius: 3px;
+  padding: 6px 8px;
+  margin: 4px 0 8px;
+  font-size: 12px;
+  color: #2a2f3a;
+  line-height: 1.4;
+}
+.popup .steps {
+  background: #fffbec;
+  border: 1px solid #f2b731;
+  border-left: 3px solid #f2b731;
+  border-radius: 0 3px 3px 0;
+  padding: 6px 8px 6px 10px;
+  margin: 6px 0 8px;
+}
+.popup .steps .section-h {
+  color: #7a5900;
+  margin-top: 0;
+}
+.popup .steps li { color: #402b06; font-size: 11.5px; }
 .popup .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   border-top: 1px solid #e4e8ef;
   padding-top: 8px;
   margin-top: 4px;
 }
 .popup .actions a {
-  color: var(--accent-2);
+  color: var(--sidebar-bg);
   text-decoration: none;
-  font-size: 12px;
+  font-size: 11px;
+  padding: 4px 8px;
+  border: 1px solid #dde1eb;
+  border-radius: 3px;
+  background: #fff;
 }
-.popup .actions a:hover { text-decoration: underline; }
+.popup .actions a:hover { background: #eef1f7; border-color: #b8c1d3; }
+.popup .actions a.primary {
+  background: var(--sidebar-bg);
+  color: #fff;
+  border-color: var(--sidebar-bg);
+}
+.popup .actions a.primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
 
 /* ---------- Responsive ---------- */
 
