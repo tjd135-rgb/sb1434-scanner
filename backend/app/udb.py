@@ -7,14 +7,25 @@ Populates udb_boundary from one of:
 
 Miami-Dade publishes the UDB as a **LineString** feature collection (32
 segments in the version shipped in-repo), not a closed polygon. We
-polygonize at ingest time via, in order:
-  1. ST_MakePolygon(ST_LineMerge(ST_Collect(g)))   — cleanest; works when
-     the merged segments form a single closed ring.
-  2. ST_MakePolygon(ST_LineMerge(ST_Node(ST_Collect(g))))  — same, after
-     noding to clean up intersections/T-junctions.
-  3. ST_BuildArea(ST_Node(ST_Collect(g)))          — last resort; handles
-     arbitrary planar topology and returns whatever closed regions form.
-The first strategy that produces a non-null, non-empty geometry wins. The
+polygonize at ingest time via a fallback chain, first-hit wins:
+  1. ST_Polygonize(ST_Union(g)) → largest polygon by area  (PRIMARY)
+     ST_Union noded/dissolves gaps that would trip ST_LineMerge, and
+     ST_Polygonize returns every closed region formed by the network.
+     The largest is the UDB itself.
+  2. ST_MakePolygon(ST_LineMerge(ST_Collect(g)))            — cleanest when
+     the merged segments already form a single closed ring.
+  3. ST_MakePolygon(ST_LineMerge(ST_Node(ST_Collect(g))))   — same, after
+     noding to clean intersections/T-junctions.
+  4. ST_BuildArea(ST_Node(ST_Collect(g)))                   — handles
+     arbitrary planar topology; returns whatever closed regions form.
+  5. ST_ConvexHull(ST_Collect(g))                           — absolute
+     last resort. Guaranteed to produce a polygon but WILDLY over-
+     estimates the UDB (swallows the west-of-UDB conservation area).
+     Only useful so downstream Miami-Dade parcels don't all end up
+     udb_status='outside'.
+
+Each strategy runs inside its own SAVEPOINT so a PostGIS error in one
+attempt can't poison the outer transaction and block later attempts. The
 chosen strategy is recorded in the source label so provenance stays
 visible in the DB.
 
@@ -134,7 +145,36 @@ _UPSERT_POLYGON = text(
 # polygon; the first strategy to insert a row wins. Working over a TEMP
 # TABLE udb_lines populated up-front so PostGIS does all the geometry work
 # server-side.
+#
+# Each strategy runs inside its own SAVEPOINT (see _polygonize_lines) so
+# that a PostGIS error in one attempt doesn't poison the outer transaction
+# and block later attempts.
 _POLYGONIZE_STRATEGIES = [
+    # PRIMARY: ST_Union nodes/dissolves the linework across all inputs, and
+    # ST_Polygonize builds every polygon that the noded network describes.
+    # In practice the Miami-Dade UDB comes back as several polygons (the
+    # main boundary plus a handful of small inclusions/holes). Take the
+    # largest by geographic area — that's the UDB itself.
+    (
+        "polygonize_union_largest",
+        text(
+            """
+            INSERT INTO udb_boundary (name, source, geom)
+            WITH parts AS (
+                SELECT (ST_Dump(ST_Polygonize(ST_Union(g)))).geom AS poly
+                  FROM udb_lines
+            )
+            SELECT :name, :source, ST_Multi(poly)
+              FROM parts
+             WHERE poly IS NOT NULL
+               AND GeometryType(poly) IN ('POLYGON', 'MULTIPOLYGON')
+               AND NOT ST_IsEmpty(poly)
+             ORDER BY ST_Area(poly::geography) DESC
+             LIMIT 1
+            RETURNING id
+            """
+        ),
+    ),
     (
         "linemerge_makepolygon",
         text(
@@ -180,6 +220,27 @@ _POLYGONIZE_STRATEGIES = [
               ) t
              WHERE poly IS NOT NULL
                AND NOT ST_IsEmpty(poly)
+            RETURNING id
+            """
+        ),
+    ),
+    # ABSOLUTE LAST RESORT: convex hull of every input vertex. Guaranteed
+    # to produce a valid polygon but WILDLY over-estimates the UDB
+    # footprint (it'd swallow all of Miami-Dade including the west-of-UDB
+    # conservation area). Only useful as a "the ingest didn't crash" fallback
+    # so downstream Miami-Dade parcels don't all end up with
+    # udb_status='outside'. Source label makes the imprecision obvious.
+    (
+        "convex_hull_fallback",
+        text(
+            """
+            INSERT INTO udb_boundary (name, source, geom)
+            SELECT :name, :source, ST_Multi(hull)
+              FROM (
+                SELECT ST_ConvexHull(ST_Collect(g)) AS hull FROM udb_lines
+              ) t
+             WHERE hull IS NOT NULL
+               AND GeometryType(hull) IN ('POLYGON', 'MULTIPOLYGON')
             RETURNING id
             """
         ),
@@ -254,6 +315,12 @@ def _polygonize_lines(conn, line_geoms: List[Dict[str, Any]], base_source: str) 
     log.info("Staged %d LineString(s) for polygonization", len(line_geoms))
 
     for strat, stmt in _POLYGONIZE_STRATEGIES:
+        # Each strategy runs inside its own SAVEPOINT. Without this, the
+        # first PostGIS error would abort the outer transaction and every
+        # subsequent execute() would fail with "current transaction is
+        # aborted, commands ignored until end of transaction block" — the
+        # fallback strategies would never actually get to run.
+        savepoint = conn.begin_nested()
         try:
             result = conn.execute(
                 stmt,
@@ -264,11 +331,19 @@ def _polygonize_lines(conn, line_geoms: List[Dict[str, Any]], base_source: str) 
             )
             inserted_ids = [row[0] for row in result]
         except Exception as e:  # noqa: BLE001 — try next strategy on any PostGIS error
+            savepoint.rollback()
             log.warning("Polygonization strategy %r raised: %s", strat, e)
             continue
+
         if inserted_ids:
+            savepoint.commit()
             log.info("Polygonization strategy %r succeeded (id=%s)", strat, inserted_ids[0])
             return strat
+
+        # Strategy ran cleanly but produced 0 rows (the WHERE clause
+        # filtered everything out). Undo whatever the statement did and
+        # try the next strategy.
+        savepoint.rollback()
         log.info("Polygonization strategy %r produced no polygon; trying next", strat)
 
     return None
