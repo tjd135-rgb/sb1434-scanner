@@ -25,6 +25,7 @@ from typing import Any, Dict
 
 from sqlalchemy import text
 
+from . import pathways
 from .db import engine
 
 log = logging.getLogger(__name__)
@@ -85,8 +86,7 @@ def ensure_indexes() -> None:
     log.info("Indexes ready")
 
 
-_INSERT_QUALIFIERS = text(
-    """
+_INSERT_QUALIFIERS_SQL = """
     INSERT INTO qualifying_parcels (
         parcel_id, county_fips, acres, env_trigger, brownfield_area_id,
         brownfield_area_name, ag_exclusion, park_exclusion, utility_flag,
@@ -130,19 +130,11 @@ _INSERT_QUALIFIERS = text(
         p.dor_uc,
         LEFT(p.own_name, 100) AS own_name,
 
-        -- Pathway hint. Ordered so more-specific codes win over the broad
-        -- 011-029 commercial/retail bucket.
-        CASE
-            WHEN p.dor_uc = '038'                       THEN 'golf_course'
-            WHEN p.dor_uc BETWEEN '041' AND '049'        THEN 'industrial'
-            WHEN p.dor_uc IN ('025','026','027')         THEN 'auto_fuel'
-            WHEN p.dor_uc BETWEEN '017' AND '019'        THEN 'office'
-            WHEN p.dor_uc BETWEEN '011' AND '029'        THEN 'commercial_retail'
-            WHEN p.dor_uc BETWEEN '071' AND '079'        THEN 'institutional'
-            WHEN p.dor_uc BETWEEN '091' AND '097'        THEN 'utility'
-            WHEN p.dor_uc BETWEEN '000' AND '009'        THEN 'residential_redev'
-            ELSE 'other'
-        END AS pathway_hint,
+        -- Pathway hint. Sourced from pathways.PATHWAY_CASE_SQL so the
+        -- 13-pathway mapping lives in ONE place; golf parcels emit
+        -- 'pathway_golf_pending' here and the ring test refines them
+        -- into pathway_1 / _1b / _2 later.
+        __PATHWAY_CASE__ AS pathway_hint,
 
         ST_Y(p.geom) AS latitude,
         ST_X(p.geom) AS longitude,
@@ -207,8 +199,17 @@ _INSERT_QUALIFIERS = text(
         pathway_hint = EXCLUDED.pathway_hint,
         latitude = EXCLUDED.latitude,
         longitude = EXCLUDED.longitude,
-        geom = EXCLUDED.geom
+        geom = EXCLUDED.geom,
+        -- Re-screening clears the golf ring-test outputs so stale
+        -- classifications don't survive; re-run /admin/run-ring-test.
+        ring_test_pct = NULL,
+        ring_test_result = NULL,
+        ring_test_samples = NULL
     """
+
+# Splice the shared 13-pathway CASE fragment into the INSERT template.
+_INSERT_QUALIFIERS = text(
+    _INSERT_QUALIFIERS_SQL.replace("__PATHWAY_CASE__", pathways.PATHWAY_CASE_SQL)
 )
 
 
@@ -297,6 +298,16 @@ _STATS_BY_UDB = text(
     """
 )
 
+_STATS_BY_RING_TEST = text(
+    """
+    SELECT ring_test_result, COUNT(*) AS n, COALESCE(SUM(acres), 0) AS acres
+      FROM qualifying_parcels
+     WHERE dor_uc = '038'
+     GROUP BY ring_test_result
+     ORDER BY n DESC
+    """
+)
+
 
 def run_screen(update_adjacency: bool = True) -> Dict[str, Any]:
     """Run the qualifying-parcel screen end-to-end and return summary stats."""
@@ -375,6 +386,7 @@ def summary() -> Dict[str, Any]:
         by_pathway = [dict(r) for r in conn.execute(_STATS_BY_PATHWAY).mappings()]
         by_trigger = [dict(r) for r in conn.execute(_STATS_BY_TRIGGER).mappings()]
         by_udb = [dict(r) for r in conn.execute(_STATS_BY_UDB).mappings()]
+        by_ring = [dict(r) for r in conn.execute(_STATS_BY_RING_TEST).mappings()]
 
     out: Dict[str, Any] = {
         "total_qualifying": int(totals["total"]),
@@ -396,6 +408,14 @@ def summary() -> Dict[str, Any]:
         "by_udb_status": [
             {"udb_status": r["udb_status"], "n": int(r["n"]), "acres": float(r["acres"])}
             for r in by_udb
+        ],
+        "by_ring_test_result": [
+            {
+                "ring_test_result": r["ring_test_result"],
+                "n": int(r["n"]),
+                "acres": float(r["acres"]),
+            }
+            for r in by_ring
         ],
     }
     log.info(

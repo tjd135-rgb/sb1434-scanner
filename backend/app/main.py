@@ -14,6 +14,7 @@ Endpoints:
 - POST /admin/ingest-udb               (Phase C2: Miami-Dade UDB polygon)
 - POST /admin/ingest-military          (Phase C3: military installations)
 - POST /admin/run-screening            (SB 1434 screen)
+- POST /admin/run-ring-test            (Phase D: golf-course ring classification)
 - GET  /admin/status                   (which long-running jobs are active)
 """
 from __future__ import annotations
@@ -36,6 +37,8 @@ from . import centroids as cent
 from . import cleanup_sites as cs
 from . import ingest as nal
 from . import military as mil
+from . import pathways
+from . import ring_test as rt
 from . import screening as scr
 from . import udb as udb_mod
 from .db import engine, get_db
@@ -58,11 +61,8 @@ app.add_middleware(
 
 _TRI_COUNTY_FIPS = {"23", "16", "60"}
 _COUNTY_NAMES = {"23": "Miami-Dade", "16": "Broward", "60": "Palm Beach"}
-_PATHWAYS = {
-    "golf_course", "industrial", "auto_fuel", "office",
-    "commercial_retail", "institutional", "utility",
-    "residential_redev", "other",
-}
+_PATHWAYS = pathways.PATHWAY_VALUES
+_RING_TEST_VALUES = pathways.RING_TEST_VALUES
 
 
 def _jsonify_one(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -149,8 +149,12 @@ def get_brownfield_area(area_id: str, db: Session = Depends(get_db)) -> Dict[str
 _QP_COLS = (
     "parcel_id, county_fips, acres, env_trigger, brownfield_area_id, "
     "brownfield_area_name, adjacent_residential, ag_exclusion, park_exclusion, "
-    "utility_flag, udb_status, dor_uc, own_name, pathway_hint, latitude, longitude"
+    "utility_flag, udb_status, dor_uc, own_name, pathway_hint, "
+    "ring_test_pct, ring_test_result, latitude, longitude"
 )
+# ring_test_samples is JSONB and can be large — surface it only on the
+# per-parcel detail endpoint, not the list.
+_QP_COLS_DETAIL = _QP_COLS + ", ring_test_samples"
 
 
 @app.get("/qualifying-parcels")
@@ -169,6 +173,9 @@ def list_qualifying_parcels(
     udb_status: Optional[str] = Query(
         None, description="'inside' or 'outside' (Miami-Dade only)"
     ),
+    ring_test_result: Optional[str] = Query(
+        None, description="'ringed', 'partially_ringed', or 'not_ringed' (golf parcels)"
+    ),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -177,6 +184,11 @@ def list_qualifying_parcels(
         raise HTTPException(status_code=400, detail=f"county must be one of {sorted(_TRI_COUNTY_FIPS)}")
     if pathway is not None and pathway not in _PATHWAYS:
         raise HTTPException(status_code=400, detail=f"pathway must be one of {sorted(_PATHWAYS)}")
+    if ring_test_result is not None and ring_test_result not in _RING_TEST_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"ring_test_result must be one of {sorted(_RING_TEST_VALUES)}",
+        )
 
     where = ["acres >= :min_acres"]
     params: Dict[str, Any] = {"min_acres": min_acres, "lim": limit, "off": offset}
@@ -196,6 +208,9 @@ def list_qualifying_parcels(
             raise HTTPException(status_code=400, detail="udb_status must be 'inside' or 'outside'")
         where.append("udb_status = :udb")
         params["udb"] = udb_status
+    if ring_test_result is not None:
+        where.append("ring_test_result = :rtr")
+        params["rtr"] = ring_test_result
 
     sql = (
         f"SELECT {_QP_COLS} FROM qualifying_parcels "
@@ -210,7 +225,7 @@ def list_qualifying_parcels(
 @app.get("/qualifying-parcels/{parcel_id}")
 def get_qualifying_parcel(parcel_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
     row = db.execute(
-        text(f"SELECT {_QP_COLS} FROM qualifying_parcels WHERE parcel_id = :pid"),
+        text(f"SELECT {_QP_COLS_DETAIL} FROM qualifying_parcels WHERE parcel_id = :pid"),
         {"pid": parcel_id},
     ).mappings().first()
     if not row:
@@ -391,3 +406,11 @@ def admin_run_screening(payload: ScreenRequest | None = None) -> Dict[str, Any]:
         scr.run_screen,
         update_adjacency=update_adjacency,
     )
+
+
+@app.post("/admin/run-ring-test")
+def admin_run_ring_test() -> Dict[str, Any]:
+    """Kick off the golf-course ring test (Phase D). Samples 12 bearings
+    around each dor_uc='038' qualifying parcel and refines pathway_hint
+    into pathway_1 / _1b / _2 based on % SF-residential neighbors."""
+    return _start_job("run-ring-test", rt.run_all)

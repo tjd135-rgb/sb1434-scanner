@@ -214,6 +214,7 @@ class QualifyingParcel(Base):
         Index("ix_qualifying_parcels_county", "county_fips"),
         Index("ix_qualifying_parcels_pathway", "pathway_hint"),
         Index("ix_qualifying_parcels_env_trigger", "env_trigger"),
+        Index("ix_qualifying_parcels_ring_test_result", "ring_test_result"),
         Index("ix_qualifying_parcels_geom", "geom", postgresql_using="gist"),
     )
 
@@ -235,6 +236,10 @@ class QualifyingParcel(Base):
     dor_uc: Mapped[str | None] = mapped_column(String(4))
     own_name: Mapped[str | None] = mapped_column(String(100))
     pathway_hint: Mapped[str | None] = mapped_column(String(50))
+    # Phase D: golf-course ring test outputs. NULL for non-golf parcels.
+    ring_test_pct: Mapped[float | None] = mapped_column(Float)
+    ring_test_result: Mapped[str | None] = mapped_column(String(20))
+    ring_test_samples = mapped_column(JSONB)
     latitude: Mapped[float | None] = mapped_column(Float)
     longitude: Mapped[float | None] = mapped_column(Float)
     geom = mapped_column(Geometry(geometry_type="POINT", srid=4326))

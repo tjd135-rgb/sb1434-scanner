@@ -95,7 +95,12 @@ Hit `http://localhost:8000/health` to confirm PostGIS is loaded.
 | POST | /admin/ingest-nal | Body `{"county":"all"\|"miami-dade"\|"broward"\|"palm-beach"}` |
 | POST | /admin/ingest-centroids | Body `{"county":"all"\|"23"\|"16"\|"60"}` |
 | POST | /admin/run-screening | Runs SB 1434 screen; body `{"update_adjacency": true}` |
+| POST | /admin/run-ring-test | Phase D — samples 12 bearings around every golf-course qualifying parcel and classifies it `ringed` / `partially_ringed` / `not_ringed` |
 | GET | /admin/status | Snapshot of in-flight/completed background jobs |
+
+`GET /qualifying-parcels` supports `?pathway=…` (one of the 14 pathway values
+in `app.pathways.PATHWAY_VALUES`) and `?ring_test_result=…`
+(`ringed` / `partially_ringed` / `not_ringed`).
 
 ### Data-source configuration (Phase C2 + C3)
 
@@ -134,6 +139,8 @@ backend/
     cleanup_sites.py      # DEP Contamination Locator (Gate 3 Trigger A)
     udb.py                # Miami-Dade Urban Development Boundary (Gate 5C)
     military.py           # Military installations (Gate 5D)
+    pathways.py           # 13-pathway classification (SQL CASE + validation)
+    ring_test.py          # Phase D: golf-course perimeter sampling
     ingest.py             # Phase A: DOR NAL loader (CLI + library)
     centroids.py          # Phase A: parcel-centroid backfill (CLI + library)
     screening.py          # SB 1434 gates as SQL
