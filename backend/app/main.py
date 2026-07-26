@@ -190,33 +190,43 @@ def list_qualifying_parcels(
             detail=f"ring_test_result must be one of {sorted(_RING_TEST_VALUES)}",
         )
 
-    where = ["acres >= :min_acres"]
+    # WHERE fragments are all qp.-prefixed so the parcels-table JOIN below
+    # can't introduce column-ambiguity errors.
+    where = ["qp.acres >= :min_acres"]
     params: Dict[str, Any] = {"min_acres": min_acres, "lim": limit, "off": offset}
     if county:
-        where.append("county_fips = :cf")
+        where.append("qp.county_fips = :cf")
         params["cf"] = county
     if pathway:
-        where.append("pathway_hint = :pw")
+        where.append("qp.pathway_hint = :pw")
         params["pw"] = pathway
     if env_trigger:
-        where.append("env_trigger = :et")
+        where.append("qp.env_trigger = :et")
         params["et"] = env_trigger
     if adjacent_only:
-        where.append("adjacent_residential = true")
+        where.append("qp.adjacent_residential = true")
     if udb_status is not None:
         if udb_status not in ("inside", "outside"):
             raise HTTPException(status_code=400, detail="udb_status must be 'inside' or 'outside'")
-        where.append("udb_status = :udb")
+        where.append("qp.udb_status = :udb")
         params["udb"] = udb_status
     if ring_test_result is not None:
-        where.append("ring_test_result = :rtr")
+        where.append("qp.ring_test_result = :rtr")
         params["rtr"] = ring_test_result
 
+    # JOIN parcels for phy_addr1/city/zip so the frontend list view can
+    # Google-search a real address. Cheap: qualifying_parcels is ~4k rows
+    # and the join is on the parcels PK.
+    qp_cols = ", ".join(f"qp.{c.strip()}" for c in _QP_COLS.split(","))
     sql = (
-        f"SELECT {_QP_COLS} FROM qualifying_parcels "
-        f"WHERE {' AND '.join(where)} "
-        "ORDER BY acres DESC NULLS LAST "
-        "LIMIT :lim OFFSET :off"
+        f"SELECT {qp_cols}, "
+        "       p.phy_addr1, p.phy_city, p.phy_zipcd "
+        "  FROM qualifying_parcels qp "
+        "  LEFT JOIN parcels p ON p.county_fips = qp.county_fips "
+        "                     AND p.parcel_id = qp.parcel_id "
+        f" WHERE {' AND '.join(where)} "
+        " ORDER BY qp.acres DESC NULLS LAST "
+        " LIMIT :lim OFFSET :off"
     )
     rows = db.execute(text(sql), params).mappings().all()
     return _jsonify([dict(r) for r in rows])

@@ -121,8 +121,22 @@
   <main class="main">
     <nav class="view-tabs" role="tablist">
       <button class="view-btn active" data-view="map" role="tab" aria-selected="true">Map</button>
+      <button class="view-btn" data-view="list" role="tab" aria-selected="false">List</button>
       <button class="view-btn" data-view="intel" role="tab" aria-selected="false">Intel</button>
     </nav>
+
+    <div id="view-list" class="view list-view" hidden>
+      <div class="list-toolbar">
+        <div>
+          <strong id="list-count">0</strong> parcels
+          <span class="list-hint">· sorted by acres · click a card to Google-search the address</span>
+        </div>
+      </div>
+      <div id="list-container" class="list-container"></div>
+      <div id="list-empty" class="list-empty hidden">
+        No qualifying parcels match the current filters.
+      </div>
+    </div>
 
     <div id="view-map" class="view active">
       <div id="map"></div>
