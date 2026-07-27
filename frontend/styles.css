@@ -336,7 +336,9 @@ html, body {
 .welcome-banner {
   position: absolute;
   top: 12px;
-  left: 12px;
+  /* Leaflet's default zoom control sits at top-left (~44px wide, 10px
+     inset). Skip past it so the banner doesn't cover the +/- buttons. */
+  left: 60px;
   right: 12px;
   background: #fffbec;
   border: 1px solid #f2b731;
