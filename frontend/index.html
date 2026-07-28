@@ -75,21 +75,19 @@
         <option value="60">Palm Beach</option>
       </select>
 
-      <select id="f-pathway" class="filter">
-        <option value="">All pathways</option>
-        <option value="pathway_1_golf_ringed">1 · Golf, ringed</option>
-        <option value="pathway_1b_golf_partial">1B · Golf, partial</option>
-        <option value="pathway_2_golf_not_ringed">2 · Golf, not ringed ★</option>
-        <option value="pathway_3_industrial">3 · Industrial</option>
-        <option value="pathway_4_commercial">4 · Commercial</option>
-        <option value="pathway_5_office">5 · Office</option>
-        <option value="pathway_7_residential_redev">7 · Residential redev</option>
-        <option value="pathway_9_auto_fuel">9 · Auto/fuel</option>
-        <option value="pathway_10_hospitality">10 · Hospitality</option>
-        <option value="pathway_11_vacant_commercial">11 · Vacant commercial</option>
-        <option value="pathway_12_mixed_use">12 · Mixed use</option>
-        <option value="pathway_13_other">13 · Other</option>
-        <option value="pathway_golf_pending">Golf · ring test pending</option>
+      <select id="f-property-type" class="filter">
+        <option value="">All property types</option>
+        <option value="golf">Golf Course</option>
+        <option value="industrial">Industrial / Warehouse</option>
+        <option value="commercial">Commercial / Retail</option>
+        <option value="office">Office</option>
+        <option value="residential">Residential</option>
+        <option value="auto_fuel">Auto / Fuel</option>
+        <option value="hospitality">Hospitality</option>
+        <option value="restaurant_entertainment">Restaurant / Entertainment</option>
+        <option value="mixed_use">Mixed Use</option>
+        <option value="vacant_commercial">Vacant Commercial</option>
+        <option value="other">Other</option>
       </select>
 
       <select id="f-env" class="filter">
@@ -119,7 +117,7 @@
 
       <label class="f-num">
         <span>Min land/imp ratio</span>
-        <input id="f-min-land-ratio" type="number" min="0" step="0.1" placeholder="0" />
+        <input id="f-min-land-ratio" type="number" min="0" step="0.1" value="1" placeholder="0" />
       </label>
 
       <label class="f-check">
@@ -318,11 +316,15 @@
                   owner). The 15-year title lookback the statute requires
                   isn&#39;t automatable, so these are excluded rather than
                   flagged.</li>
-              <li><strong>Broad government ownership</strong> (COUNTY OF,
-                  CITY OF, STATE OF FLORIDA, UNITED STATES, SCHOOL BOARD,
-                  WATER MANAGEMENT) — <em>unless</em> the DOR use code is
-                  commercial or industrial (010-049), in which case the
-                  parcel might be leasable and still actionable.</li>
+              <li><strong>Broad government ownership</strong> — any owner
+                  name containing COUNTY (with or without OF), CITY OF,
+                  TOWN OF, VILLAGE OF, MUNICIPAL, GOVERNMENT, DISTRICT,
+                  STATE OF FLORIDA, UNITED STATES, SCHOOL BOARD or
+                  SCHOOL DISTRICT, WATER MANAGEMENT / SOUTH FLORIDA
+                  WATER. Excluded <em>unless</em> the DOR use code is
+                  commercial or industrial (010-049) — governments
+                  sometimes own leasable commercial land that&#39;s still
+                  actionable.</li>
               <li><strong>Military owner patterns</strong> — parcels whose
                   owner name contains AIR BASE / AIR FORCE / MILITARY /
                   NAVY / ARMY / NATIONAL GUARD / COAST GUARD, catching
@@ -332,11 +334,40 @@
         </details>
 
         <details class="intel-section">
-          <summary><span class="s-num">3</span> The 13 redevelopment pathways</summary>
+          <summary><span class="s-num">3</span> Property type vs. SB 1434 pathway</summary>
           <div class="intel-body">
-            <p>Every qualifying parcel is classified into one of thirteen
-               pathways based on current DOR use code (and, for golf, the ring
-               test). The pathway shapes the redevelopment thesis.</p>
+            <p>The scanner uses <strong>two different classifications</strong>
+               for each qualifying parcel, and it&#39;s easy to conflate
+               them:</p>
+            <ul>
+              <li><strong>Property type</strong> — what the parcel actually
+                  <em>is</em> today (Warehouse, Golf Course, Shopping Center,
+                  Hotel, Vacant Commercial). This is the primary way the
+                  scanner organizes deals: the filter dropdown, the map
+                  legend, and the marker colors all key off property type.
+                  It&#39;s what you&#39;d see if you drove past the parcel.</li>
+              <li><strong>SB 1434 pathway</strong> — <em>how</em> the parcel
+                  qualifies under the statute. It shows in the detail drawer
+                  as "SB 1434 Qualification: Pathway N — ...". It matters
+                  for underwriting (whether the density overlay applies, what
+                  contamination profile to expect) but it&#39;s not what a
+                  developer thinks of first — you&#39;re looking for
+                  "warehouses on the north corridor", not "pathway 3
+                  parcels".</li>
+            </ul>
+            <p>The pathway thesis (per redevelopment angle) still shows up in
+               the drawer&#39;s "Redevelopment angle" one-liner and the list
+               card&#39;s angle callout. Every qualifying parcel maps to
+               exactly one property type and exactly one pathway.</p>
+          </div>
+        </details>
+
+        <details class="intel-section">
+          <summary><span class="s-num">3B</span> The SB 1434 pathways (underwriting classifications)</summary>
+          <div class="intel-body">
+            <p>The scanner assigns each qualifying parcel to one of twelve
+               SB 1434 pathways plus a transient <em>golf pending ring test</em>
+               state. Pathway shapes the redevelopment thesis.</p>
 
             <h3>Golf pathways (1, 1B, 2)</h3>
             <p><strong>Pathway 1 — Golf, ringed.</strong> Course surrounded by
@@ -614,17 +645,25 @@
           <summary><span class="s-num">1</span> Ten-minute workflow</summary>
           <div class="intel-body">
             <ol class="workflow">
-              <li><strong>Hit the gold Golf Opportunities tile</strong> at the
-                  top of the page. Instant filter to Pathway 2 (not-ringed
-                  golf) — the highest-value bucket where the SB 1434 overlay
-                  does <em>not</em> apply.</li>
+              <li><strong>Note the default.</strong> On load the scanner
+                  shows only <strong>land-heavy parcels</strong> (Min
+                  land/imp ratio ≥ 1.0) — land worth as much or more than
+                  what&#39;s built on it, the classic underutilized-parcel
+                  signal. Clear the ratio input to see every qualifying
+                  parcel.</li>
+              <li><strong>Filter by Property Type.</strong> That&#39;s what
+                  the dropdown is — <em>what the parcel actually is today</em>
+                  (Warehouse, Golf Course, Shopping Center, Mobile Home
+                  Park). The map legend colors match. Property type is
+                  distinct from SB 1434 pathway — the pathway (how it
+                  qualifies) shows in the drawer under each parcel.</li>
+              <li><strong>Hit the gold Golf Opportunities tile</strong>
+                  when you want the top deals. It sets Property Type =
+                  Golf + Ring Test = not-ringed in one click.</li>
               <li><strong>Narrow by county</strong> if you have a target
-                  market. Miami-Dade has the deepest inventory; Broward and
-                  Palm Beach are smaller pools but often cleaner titles.</li>
-              <li><strong>Set Min land/imp ratio ≥ 1.0</strong> (or check
-                  <em>Land-heavy only</em>). This surfaces parcels where the
-                  land is worth as much or more than what&#39;s built —
-                  the classic underutilized-parcel signal.</li>
+                  market. Miami-Dade has the deepest inventory; Broward
+                  and Palm Beach are smaller pools but often cleaner
+                  titles.</li>
               <li><strong>Click a marker</strong> to open the detail drawer.
                   Skim the gate checklist, redev angle, and next steps.
                   Every panel is scrollable independently — the map stays
@@ -649,14 +688,18 @@
         <details class="intel-section" open>
           <summary><span class="s-num">2</span> Reading the map</summary>
           <div class="intel-body">
-            <p><strong>Marker color</strong> = pathway (see legend, bottom-right
-               of the map).<br>
+            <p><strong>Marker color</strong> = property type (see legend,
+               bottom-right of the map — greens for golf/residential, gray
+               for industrial, blue for commercial, etc.).<br>
                <strong>Marker size</strong> = √acres, so a 400-acre course
                looks 4× the diameter of a 25-acre parcel.<br>
-               <strong>Gold star markers</strong> are <em>Pathway 2 golf-not-ringed</em>
-               — 30% larger with a heavier outline so they pop.</p>
+               <strong>Gold star markers</strong> are the not-ringed golf
+               courses — 30% larger with a heavier outline so they pop.
+               Ringed and partially-ringed golf courses stay green (the
+               property-type color).</p>
             <p><strong>Floating legend</strong> is clickable — clicking any
-               pathway entry filters the map to that pathway.</p>
+               property-type row filters the map to that type; the golf-star
+               row filters to not-ringed golf specifically.</p>
             <p><strong>Satellite toggle</strong> in the filter bar swaps OSM
                streets for Esri World Imagery. Streets give you addresses
                and street names; satellite shows parcel context — buildings,
@@ -695,7 +738,9 @@
                   the pathway.</li>
               <li><strong>Next steps</strong>: per-parcel actionable checks.</li>
               <li><strong>Action buttons</strong>: Google search, 🛰️ Aerial
-                  (satellite), 🚗 Street View, County Appraiser deep link.</li>
+                  (Google Maps satellite search by the parcel&#39;s address
+                  — falls back to lat/lng if no address on file), and the
+                  correct county property-appraiser deep link.</li>
             </ul>
           </div>
         </details>
@@ -764,14 +809,23 @@
               <dd>Substring match on parcel ID or owner name (case-insensitive).
                   When exactly one match is found, the map zooms to it. Press
                   <em>Escape</em> to clear.</dd>
+              <dt>Property Type</dt>
+              <dd>Client-side filter on what the parcel actually is today
+                  (Golf Course, Warehouse, Shopping Center, etc.). Not the
+                  same as SB 1434 pathway — see §3 of the How It Works tab.</dd>
               <dt>Min acres</dt>
               <dd>Absolute minimum on <code>acres</code>. Defaults to 5 via
                   Gate 1; raise it to strip out marginal parcels.</dd>
               <dt>Min land/imp ratio</dt>
-              <dd>Absolute minimum on the land/improvement ratio. 1.0 = land
-                  worth as much as improvements. 999 = fully vacant.</dd>
+              <dd>Minimum on the land/improvement ratio.
+                  <strong>Defaults to 1.0</strong> on load, so the scanner
+                  starts by showing only land-heavy parcels — land worth
+                  as much or more than what&#39;s built. 999 = vacant /
+                  near-vacant. Clear the input to see everything.</dd>
               <dt>Land-heavy only</dt>
-              <dd>Shortcut for min ratio ≥ 1.0.</dd>
+              <dd>Shortcut for min ratio ≥ 1.0 (redundant when the default
+                  is already 1.0, useful when you&#39;ve raised the ratio
+                  above 1 and want to snap back).</dd>
               <dt>Satellite</dt>
               <dd>Swaps the map basemap.</dd>
               <dt>Watchlist toggle</dt>

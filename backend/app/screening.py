@@ -220,11 +220,20 @@ _INSERT_QUALIFIERS_SQL = """
         -- Gate 5I: exclude broad government ownership UNLESS the DOR
         -- code shows a commercial or industrial use (010-049) — govts
         -- sometimes own leasable commercial land that stays actionable.
+        -- Broadened to catch owner names without the "OF" suffix
+        -- (e.g. "BROWARD COUNTY", "MUNICIPAL PARKING", "TOWN OF DAVIE",
+        -- "SOUTH BROWARD DRAINAGE DISTRICT").
         AND NOT (
             NOT (p.dor_uc BETWEEN '010' AND '049')
             AND (
                 p.own_name ILIKE '%COUNTY OF%'
+                OR p.own_name ILIKE '%COUNTY%'
                 OR p.own_name ILIKE '%CITY OF%'
+                OR p.own_name ILIKE '%TOWN OF%'
+                OR p.own_name ILIKE '%VILLAGE OF%'
+                OR p.own_name ILIKE '%MUNICIPAL%'
+                OR p.own_name ILIKE '%GOVERNMENT%'
+                OR p.own_name ILIKE '%DISTRICT%'
                 OR p.own_name ILIKE '%STATE OF FLORIDA%'
                 OR p.own_name ILIKE '%UNITED STATES%'
                 OR p.own_name ILIKE '%SCHOOL BOARD%'

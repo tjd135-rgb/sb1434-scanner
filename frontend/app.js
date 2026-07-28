@@ -133,6 +133,46 @@
     return DOR_USE_CODES[dor_uc] || `DOR ${dor_uc}`;
   }
 
+  // Property-type buckets — the primary categorization users interact with.
+  // Ordered by specificity so the first match wins in propertyTypeKey().
+  // Colors are the map/legend palette.
+  const PROPERTY_TYPE_STYLE = {
+    golf:                     { color: "#3ea55c", label: "Golf Course" },
+    industrial:               { color: "#5b6a7e", label: "Industrial / Warehouse" },
+    commercial:               { color: "#2f6fd9", label: "Commercial / Retail" },
+    office:                   { color: "#4682b4", label: "Office" },
+    residential:              { color: "#7dc47a", label: "Residential" },
+    auto_fuel:                { color: "#e0821e", label: "Auto / Fuel" },
+    hospitality:              { color: "#c62d8b", label: "Hospitality" },
+    restaurant_entertainment: { color: "#7b3f9f", label: "Restaurant / Entertainment" },
+    mixed_use:                { color: "#4b3fa6", label: "Mixed Use" },
+    vacant_commercial:        { color: "#1fa39a", label: "Vacant Commercial" },
+    other:                    { color: "#a4abb9", label: "Other" },
+  };
+
+  // Map a DOR use code to exactly one property-type key. Order matters —
+  // more specific matches (vacant_commercial 010, auto_fuel 025-028/048)
+  // win over broader ones (commercial 010-029, industrial 040-049).
+  function propertyTypeKey(dor_uc) {
+    if (!dor_uc) return "other";
+    const c = String(dor_uc);
+    if (c === "038") return "golf";
+    if (c === "039") return "hospitality";
+    if (c === "010") return "vacant_commercial";
+    if (c === "030" || c === "031") return "mixed_use";
+    if (["025", "026", "027", "028", "048"].includes(c)) return "auto_fuel";
+    if (["021", "022", "032", "033", "034", "035"].includes(c)) return "restaurant_entertainment";
+    if (c >= "017" && c <= "019") return "office";
+    if (c >= "001" && c <= "009") return "residential";
+    if (c >= "040" && c <= "049") return "industrial";      // 048 already caught by auto_fuel
+    if (c >= "011" && c <= "029") return "commercial";      // narrower buckets already caught above
+    return "other";
+  }
+
+  function styleForPropertyType(key) {
+    return PROPERTY_TYPE_STYLE[key] || PROPERTY_TYPE_STYLE.other;
+  }
+
   // ------------------------------------------------------------------
   // DOM refs
   // ------------------------------------------------------------------
@@ -148,7 +188,7 @@
     kpiAdjacent: $("kpi-adjacent"),
     kpiGolf: $("kpi-golf"),
     fCounty: $("f-county"),
-    fPathway: $("f-pathway"),
+    fPropertyType: $("f-property-type"),
     fEnv: $("f-env"),
     fRing: $("f-ring"),
     fUdb: $("f-udb"),
@@ -263,8 +303,12 @@
   }
 
   function makeMarker(parcel) {
-    const style = styleForPathway(parcel.pathway_hint);
+    // Marker color = property-type color. Special case: not-ringed golf
+    // uses the accent gold so the top deals still pop off the map even
+    // though "golf" is normally green.
     const isTopDeal = parcel.pathway_hint === "pathway_2_golf_not_ringed";
+    const ptStyle = styleForPropertyType(propertyTypeKey(parcel.dor_uc));
+    const fillColor = isTopDeal ? "#f2b731" : ptStyle.color;
     const baseRadius = radiusForAcres(parcel.acres);
     const radius = isTopDeal ? baseRadius * 1.3 : baseRadius;
 
@@ -275,7 +319,7 @@
         color: "#1a1e26",
         weight: isTopDeal ? 2 : 1,
         opacity: 1,
-        fillColor: style.color,
+        fillColor,
         fillOpacity: 0.82,
       },
     );
@@ -391,8 +435,6 @@
     actions.push(`<a class="primary" href="${googleSearchUrl(p)}" target="_blank" rel="noopener">Search Google</a>`);
     const aer = aerialUrl(p);
     if (aer) actions.push(`<a href="${aer}" target="_blank" rel="noopener">🛰️ Aerial</a>`);
-    const sv = streetViewUrl(p);
-    if (sv) actions.push(`<a href="${sv}" target="_blank" rel="noopener">🚗 Street View</a>`);
     const pa = paLink(p);
     if (pa) actions.push(`<a href="${pa.url}" target="_blank" rel="noopener" title="${esc(pa.label)}">County Appraiser</a>`);
     parts.push(`<div class="actions">${actions.join("")}</div>`);
@@ -540,12 +582,15 @@
     return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
   }
   function aerialUrl(p) {
+    // Prefer an address search — Google Maps handles typo tolerance
+    // and drops you at the correct building. Coordinates fall back
+    // only when we truly have no address on file.
+    const addr = addressString(p);
+    if (addr) {
+      return `https://www.google.com/maps/search/${encodeURIComponent(addr)}`;
+    }
     if (p.latitude == null || p.longitude == null) return null;
-    return `https://www.google.com/maps/@${p.latitude},${p.longitude},17z/data=!3m1!1e3`;
-  }
-  function streetViewUrl(p) {
-    if (p.latitude == null || p.longitude == null) return null;
-    return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${p.latitude},${p.longitude}`;
+    return `https://www.google.com/maps/@${p.latitude},${p.longitude},500m/data=!3m1!1e3`;
   }
   function paLink(p) { return PA_URLS[p.county_fips] || null; }
 
@@ -578,9 +623,12 @@
   function currentFilters() {
     const q = new URLSearchParams();
     q.set("limit", String(PARCEL_LIMIT));
+    // NOTE: property type is applied client-side (see applyClientFilters).
+    // The API only knows the pathway_hint column, not the property-type
+    // bucket, so it's simpler to fetch server-side by the other filters
+    // and narrow to property type in JS.
     const mapping = {
       county: els.fCounty.value,
-      pathway: els.fPathway.value,
       env_trigger: els.fEnv.value,
       ring_test_result: els.fRing.value,
       udb_status: els.fUdb.value,
@@ -625,8 +673,12 @@
   }
 
   function applyClientFilters(rows) {
-    const q = searchQuery.trim().toLowerCase();
     let out = rows;
+    const ptKey = els.fPropertyType?.value || "";
+    if (ptKey) {
+      out = out.filter((p) => propertyTypeKey(p.dor_uc) === ptKey);
+    }
+    const q = searchQuery.trim().toLowerCase();
     if (q) {
       out = out.filter((p) => {
         const pid = String(p.parcel_id || "").toLowerCase();
@@ -725,8 +777,6 @@
     const actions = [];
     const aer = aerialUrl(p);
     if (aer) actions.push(`<a class="btn" href="${aer}" target="_blank" rel="noopener">🛰️ Aerial</a>`);
-    const sv = streetViewUrl(p);
-    if (sv) actions.push(`<a class="btn" href="${sv}" target="_blank" rel="noopener">🚗 Street View</a>`);
     const pa = paLink(p);
     if (pa) actions.push(`<a class="btn" href="${pa.url}" target="_blank" rel="noopener" title="${esc(pa.label)}">County Appraiser</a>`);
     actions.push(`<button class="btn copy-btn" type="button" data-copy="${esc(p.parcel_id || "")}">Copy Parcel ID</button>`);
@@ -907,19 +957,24 @@
 
   function initFilters() {
     const rerun = () => loadParcels();
-    ["fCounty", "fPathway", "fEnv", "fRing", "fUdb"].forEach((k) => {
+    // County, env-trigger, ring-test and UDB all round-trip to the API.
+    // Property type is client-side and only needs a re-render.
+    ["fCounty", "fEnv", "fRing", "fUdb"].forEach((k) => {
       els[k].addEventListener("change", rerun);
     });
+    els.fPropertyType.addEventListener("change", () => rerender());
     els.fMinAcres.addEventListener("input", debounce(rerun, 350));
     els.fMinLandRatio?.addEventListener("input", debounce(rerun, 350));
     els.fLandHeavy?.addEventListener("change", rerun);
     els.fSatellite?.addEventListener("change", () => setBasemap(els.fSatellite.checked));
     els.fExportCsv?.addEventListener("click", exportCsv);
     els.fReset.addEventListener("click", () => {
-      els.fCounty.value = ""; els.fPathway.value = "";
+      els.fCounty.value = ""; els.fPropertyType.value = "";
       els.fEnv.value = ""; els.fRing.value = ""; els.fUdb.value = "";
       els.fMinAcres.value = "";
-      if (els.fMinLandRatio) els.fMinLandRatio.value = "";
+      // Land ratio resets to the default of 1 (land-heavy default) —
+      // NOT blank. Users clear it explicitly if they want everything.
+      if (els.fMinLandRatio) els.fMinLandRatio.value = "1";
       if (els.fLandHeavy) els.fLandHeavy.checked = false;
       if (els.fSearch) {
         els.fSearch.value = ""; searchQuery = "";
@@ -929,9 +984,11 @@
       clearBrownfieldOverlay();
       loadParcels();
     });
-    // Golf KPI shortcut.
+    // Golf KPI shortcut — set the property-type filter to Golf AND the
+    // ring-test filter to not-ringed so the map narrows to the top deals.
     els.kpiGolf?.addEventListener("click", () => {
-      els.fPathway.value = "pathway_2_golf_not_ringed";
+      els.fPropertyType.value = "golf";
+      els.fRing.value = "not_ringed";
       loadParcels();
     });
   }
@@ -940,19 +997,26 @@
     const legendControl = L.control({ position: "bottomright" });
     legendControl.onAdd = () => {
       const div = L.DomUtil.create("div", "map-legend");
-      const rows = Object.entries(PATHWAY_STYLE).map(
+      // Property-type rows + one dedicated row for the golf "not ringed"
+      // top-deal star treatment.
+      const rows = Object.entries(PROPERTY_TYPE_STYLE).map(
         ([key, style]) => `
-          <li data-pathway="${key}">
-            <span class="swatch${style.star ? " star" : ""}" style="background:${style.color}"></span>
-            <span>${esc(style.short || style.label)}</span>
+          <li data-property-type="${key}">
+            <span class="swatch" style="background:${style.color}"></span>
+            <span>${esc(style.label)}</span>
           </li>`,
       ).join("");
+      const golfStarRow = `
+        <li data-ring="not_ringed" class="legend-topdeal">
+          <span class="swatch star" style="background:#f2b731"></span>
+          <span>Golf · not ringed ★</span>
+        </li>`;
       div.innerHTML = `
         <div class="map-legend-head">
-          <span>Pathway legend</span>
+          <span>Property type</span>
           <span class="map-legend-caret">▾</span>
         </div>
-        <ul class="map-legend-list">${rows}</ul>
+        <ul class="map-legend-list">${rows}${golfStarRow}</ul>
       `;
       L.DomEvent.disableClickPropagation(div);
       L.DomEvent.disableScrollPropagation(div);
@@ -962,8 +1026,14 @@
       div.querySelectorAll(".map-legend-list li").forEach((li) => {
         li.addEventListener("click", (e) => {
           e.stopPropagation();
-          els.fPathway.value = li.dataset.pathway;
-          loadParcels();
+          if (li.dataset.ring) {
+            // Golf-star row: apply the ring-test filter server-side.
+            els.fRing.value = li.dataset.ring;
+            loadParcels();
+          } else if (li.dataset.propertyType) {
+            els.fPropertyType.value = li.dataset.propertyType;
+            rerender();
+          }
         });
       });
       return div;
