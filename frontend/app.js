@@ -663,38 +663,59 @@
   }
   function paLink(p) { return PA_URLS[p.county_fips] || null; }
 
-  // Listings-search links. No free MLS API exists for a static frontend,
-  // so we can't confirm whether a parcel is actually listed — these
-  // buttons just open an address-based search on each site. If a listing
-  // exists the user sees it in one click; if not, they get an empty-results
-  // page. Only surface the sites that fit the property type.
+  // Listings-search links.
+  //
+  // Direct site URLs don't reliably honor address query params — LoopNet
+  // and Crexi both ignore what we send and default to national. So the
+  // primary buttons use a Google site:search with the exact address in
+  // quotes: if the site has any indexed listing page for that address,
+  // Google jumps you straight to it; if not, you get an empty result
+  // (which is the honest answer to "is this parcel listed?").
+  //
+  // No free listings API exists for a static frontend to confirm
+  // active-for-sale status without scraping, which would require a
+  // backend + violate site ToS. This is the closest we can get.
   function listingLinks(p) {
     const addr = addressString(p);
     if (!addr) return [];
-    const enc = encodeURIComponent(addr);
+    const quoted = `"${addr}"`;
+    const encGoogleQ = (site) =>
+      "https://www.google.com/search?q=" +
+      encodeURIComponent(`site:${site} ${quoted}`);
+
     const key = propertyTypeKey(p.dor_uc);
     const isResidential = key === "residential";
-    const isCommercial = ["commercial", "industrial", "office", "auto_fuel",
-      "hospitality", "restaurant_entertainment", "mixed_use",
-      "vacant_commercial", "golf", "other"].includes(key);
     const out = [];
-    if (isCommercial) {
+
+    // Commercial-first buckets get LoopNet + Crexi first.
+    if (!isResidential) {
       out.push({
         label: "LoopNet",
-        url: `https://www.loopnet.com/search/?geography=${enc}`,
-        title: "LoopNet commercial listings search",
+        url: encGoogleQ("loopnet.com"),
+        title: `Google site-search — LoopNet listings for ${addr}`,
       });
       out.push({
         label: "Crexi",
-        url: `https://www.crexi.com/properties?locations=${enc}`,
-        title: "Crexi commercial listings search",
+        url: encGoogleQ("crexi.com"),
+        title: `Google site-search — Crexi listings for ${addr}`,
       });
     }
-    if (isResidential || isCommercial) {
+    // Zillow works for both — but the direct-URL slug format DOES
+    // resolve to a page for most Florida addresses, so use it here
+    // instead of the Google detour. If no listing exists, Zillow
+    // still shows the address's Zestimate / property-details page.
+    const zillowSlug = addr.replace(/,/g, "").replace(/\s+/g, "-");
+    out.push({
+      label: "Zillow",
+      url: `https://www.zillow.com/homes/${encodeURIComponent(zillowSlug)}_rb/`,
+      title: `Zillow property page for ${addr}`,
+    });
+    // For residential parcels also add Realtor.com direct-address URL.
+    if (isResidential) {
       out.push({
-        label: "Zillow",
-        url: `https://www.zillow.com/homes/${enc.replace(/%20/g, "-")}_rb/`,
-        title: "Zillow search",
+        label: "Realtor",
+        url: `https://www.realtor.com/realestateandhomes-search/${encodeURIComponent(zillowSlug)}`,
+        title: `Realtor.com search for ${addr}`,
       });
     }
     return out;
