@@ -848,11 +848,17 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const gj = await r.json();
       brownfieldOverlay = L.geoJSON(gj, {
+        // Force SVG rendering — the map is preferCanvas:true (so all
+        // 2k+ CircleMarkers share ONE canvas for performance), but if
+        // GeoJSON polygons hit that same canvas they render underneath
+        // and effectively vanish. An explicit SVG renderer puts them
+        // in their own overlay pane on top of the tiles.
+        renderer: L.svg({ padding: 0.5 }),
         style: {
-          color: "#c8871d",
-          weight: 1.5,
+          color: "#a05c00",
+          weight: 2,
           fillColor: "#f2b731",
-          fillOpacity: 0.18,
+          fillOpacity: 0.42,
         },
         onEachFeature: (feature, layer) => {
           const p = feature.properties || {};
@@ -884,12 +890,13 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const gj = await r.json();
       udbOverlay = L.geoJSON(gj, {
+        renderer: L.svg({ padding: 0.5 }),
         style: {
-          color: "#4ea1ff",
-          weight: 2.5,
+          color: "#1a5fb4",
+          weight: 3.5,
           fillColor: "#4ea1ff",
-          fillOpacity: 0.06,
-          dashArray: "8 5",
+          fillOpacity: 0.10,
+          dashArray: "10 6",
         },
         interactive: false,
       }).addTo(map);
