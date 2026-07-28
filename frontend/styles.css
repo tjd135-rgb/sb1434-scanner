@@ -180,15 +180,9 @@ html, body {
 .filter-row {
   padding: 5px 12px;
   gap: 6px;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
+  flex-wrap: wrap;   /* wrap to a second line rather than showing a scrollbar */
   background: var(--topbar-bg);
-  scrollbar-width: thin;
-}
-.filter-row::-webkit-scrollbar { height: 6px; }
-.filter-row::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.15); border-radius: 3px;
+  row-gap: 4px;
 }
 .filter-row > * { flex-shrink: 0; }
 .f-search {
@@ -273,6 +267,7 @@ html, body {
 .btn-export.sm, .btn-reset.sm { padding: 3px 8px; font-size: 10.5px; }
 
 /* Hide the filter row when the current view doesn't apply filters. */
+body[data-view="bill"] #filter-bar,
 body[data-view="how"] #filter-bar,
 body[data-view="guide"] #filter-bar { display: none; }
 

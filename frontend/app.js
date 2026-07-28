@@ -994,7 +994,7 @@
   }
 
   function initLegend() {
-    const legendControl = L.control({ position: "bottomright" });
+    const legendControl = L.control({ position: "bottomleft" });
     legendControl.onAdd = () => {
       const div = L.DomUtil.create("div", "map-legend");
       // Property-type rows + one dedicated row for the golf "not ringed"
@@ -1093,7 +1093,7 @@
   // View toggle (Map / List / How / Guide)
   // ------------------------------------------------------------------
 
-  const VIEW_KEYS = ["map", "list", "how", "guide"];
+  const VIEW_KEYS = ["map", "list", "bill", "how", "guide"];
 
   function switchToView(target) {
     document.querySelectorAll(".view-btn").forEach((b) => {
@@ -1111,7 +1111,7 @@
     document.body.dataset.view = target;
     if (target === "map") map.invalidateSize();
     // Close the drawer when the user switches away from map/list — a
-    // parcel detail isn't meaningful under How It Works.
+    // parcel detail isn't meaningful under the Intel tabs.
     if (target !== "map" && target !== "list") closeDrawer();
   }
 

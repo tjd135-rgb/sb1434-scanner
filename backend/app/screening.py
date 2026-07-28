@@ -197,8 +197,9 @@ _INSERT_QUALIFIERS_SQL = """
         -- redevelopment targets at scale.
         AND NOT (p.dor_uc BETWEEN '070' AND '079')
         -- Gate 5F: exclude the additional school DOR codes not already
-        -- caught by 070-079: 072 private schools + 084 colleges.
-        AND p.dor_uc NOT IN ('084')
+        -- caught by 070-079: 084 colleges. Also 020 airports/bus/marine
+        -- terminals — infrastructure, not redevelopable land.
+        AND p.dor_uc NOT IN ('020', '084')
         -- Gate 5G: exclude utility parcels (DOR 091-097). Removed
         -- from pathways because the 15-year title lookback required
         -- to confirm qualification isn't actionable without manual
@@ -217,29 +218,39 @@ _INSERT_QUALIFIERS_SQL = """
             OR p.own_name ILIKE '%COAST GUARD%'
             OR p.own_name ILIKE '%HOMESTEAD AIR%'
         )
-        -- Gate 5I: exclude broad government ownership UNLESS the DOR
-        -- code shows a commercial or industrial use (010-049) — govts
-        -- sometimes own leasable commercial land that stays actionable.
-        -- Broadened to catch owner names without the "OF" suffix
-        -- (e.g. "BROWARD COUNTY", "MUNICIPAL PARKING", "TOWN OF DAVIE",
-        -- "SOUTH BROWARD DRAINAGE DISTRICT").
+        -- Gate 5I: broad government-ownership exclusion.
+        --
+        -- The escape hatch (keep parcels in the qualifying set even when
+        -- govt-owned) applies ONLY when:
+        --   (a) DOR code is commercial or industrial (010-049), AND
+        --   (b) owner name does NOT flag transportation infrastructure
+        --       (AIRPORT / AIR PORT / TRANSIT / BUS TERMINAL — those
+        --       are dedicated infrastructure and never developable
+        --       regardless of the DOR bucket, e.g. an airport parking
+        --       lot classifies as DOR 028 but isn't actionable).
         AND NOT (
-            NOT (p.dor_uc BETWEEN '010' AND '049')
+            (
+                NOT (p.dor_uc BETWEEN '010' AND '049')
+                OR p.own_name ILIKE '%AIRPORT%'
+                OR p.own_name ILIKE '%AIR PORT%'
+                OR p.own_name ILIKE '%TRANSIT%'
+                OR p.own_name ILIKE '%BUS TERMINAL%'
+            )
             AND (
-                p.own_name ILIKE '%COUNTY OF%'
+                p.own_name ILIKE '%CITY OF%'
                 OR p.own_name ILIKE '%COUNTY%'
-                OR p.own_name ILIKE '%CITY OF%'
+                OR p.own_name ILIKE '%STATE OF%'
+                OR p.own_name ILIKE '%UNITED STATES%'
                 OR p.own_name ILIKE '%TOWN OF%'
                 OR p.own_name ILIKE '%VILLAGE OF%'
+                OR p.own_name ILIKE '%DISTRICT%'
                 OR p.own_name ILIKE '%MUNICIPAL%'
                 OR p.own_name ILIKE '%GOVERNMENT%'
-                OR p.own_name ILIKE '%DISTRICT%'
-                OR p.own_name ILIKE '%STATE OF FLORIDA%'
-                OR p.own_name ILIKE '%UNITED STATES%'
                 OR p.own_name ILIKE '%SCHOOL BOARD%'
-                OR p.own_name ILIKE '%SCHOOL DISTRICT%'
                 OR p.own_name ILIKE '%WATER MANAGEMENT%'
                 OR p.own_name ILIKE '%SOUTH FLORIDA WATER%'
+                OR p.own_name ILIKE '%DEPARTMENT OF%'
+                OR p.own_name ILIKE '%AUTHORITY%'
             )
         )
     ON CONFLICT (parcel_id) DO UPDATE SET
