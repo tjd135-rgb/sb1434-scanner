@@ -196,6 +196,8 @@
     fMinLandRatio: $("f-min-land-ratio"),
     fLandHeavy: $("f-land-heavy"),
     fSatellite: $("f-satellite"),
+    fShowBrownfields: $("f-show-brownfields"),
+    fShowUdb: $("f-show-udb"),
     fReset: $("f-reset"),
     fExportCsv: $("f-export-csv"),
     fSearch: $("f-search"),
@@ -287,7 +289,11 @@
   baseStreets.addTo(map);
 
   let markerGroup = L.layerGroup().addTo(map);
+  // Always-on toggleable overlays. Each holds an L.geoJSON layer while
+  // the corresponding sidebar checkbox is checked; null when the layer
+  // isn't on the map.
   let brownfieldOverlay = null;
+  let udbOverlay = null;
 
   // ------------------------------------------------------------------
   // Marker rendering
@@ -356,7 +362,8 @@
         openDrawer(parcel);
       });
     }
-    showBrownfieldFor(parcel);
+    // Brownfield polygon overlay is now a persistent toggle in the
+    // filter row — no per-parcel fetch on drawer open.
   }
 
   function closeDrawer() {
@@ -367,7 +374,6 @@
       els.drawer.hidden = true;
       els.drawer.setAttribute("aria-hidden", "true");
     }, 220);
-    clearBrownfieldOverlay();
   }
 
   function renderDrawer(p) {
@@ -820,35 +826,85 @@
   }
 
   // ------------------------------------------------------------------
-  // Brownfield polygon overlay
+  // Always-on toggleable overlays (brownfield areas + UDB boundary)
+  //
+  // Each is a single L.geoJSON fetched from a GeoJSON endpoint on toggle.
+  // Layers stay put as the user pans/zooms and are cleared when the
+  // checkbox flips off. Fetched lazily (only when the user first turns
+  // the toggle on).
   // ------------------------------------------------------------------
 
-  function clearBrownfieldOverlay() {
-    if (brownfieldOverlay) {
-      map.removeLayer(brownfieldOverlay);
-      brownfieldOverlay = null;
+  async function setBrownfieldOverlay(on) {
+    if (!on) {
+      if (brownfieldOverlay) {
+        map.removeLayer(brownfieldOverlay);
+        brownfieldOverlay = null;
+      }
+      return;
+    }
+    if (brownfieldOverlay) return;   // already on the map
+    try {
+      const r = await fetch(`${API_BASE}/brownfield-areas/geojson`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const gj = await r.json();
+      brownfieldOverlay = L.geoJSON(gj, {
+        style: {
+          color: "#c8871d",
+          weight: 1.5,
+          fillColor: "#f2b731",
+          fillOpacity: 0.18,
+        },
+        onEachFeature: (feature, layer) => {
+          const p = feature.properties || {};
+          const bits = [];
+          if (p.name) bits.push(`<strong>${escapeAttr(p.name)}</strong>`);
+          if (p.county) bits.push(escapeAttr(String(p.county)));
+          if (p.acres != null) bits.push(`${Number(p.acres).toLocaleString()} acres`);
+          if (bits.length) layer.bindTooltip(bits.join(" · "), { sticky: true });
+        },
+      }).addTo(map);
+    } catch (e) {
+      console.error("brownfield overlay fetch failed:", e);
+      showToast(`Failed to load brownfield areas: ${e.message}`);
+      if (els.fShowBrownfields) els.fShowBrownfields.checked = false;
     }
   }
-  async function showBrownfieldFor(parcel) {
-    clearBrownfieldOverlay();
-    if (!parcel.brownfield_area_id) return;
+
+  async function setUdbOverlay(on) {
+    if (!on) {
+      if (udbOverlay) {
+        map.removeLayer(udbOverlay);
+        udbOverlay = null;
+      }
+      return;
+    }
+    if (udbOverlay) return;
     try {
-      const r = await fetch(`${API_BASE}/brownfield-areas/${encodeURIComponent(parcel.brownfield_area_id)}`);
-      if (!r.ok) return;
-      const detail = await r.json();
-      const geom = detail.geometry;
-      if (!geom) return;
-      brownfieldOverlay = L.geoJSON(geom, {
+      const r = await fetch(`${API_BASE}/udb-boundary/geojson`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const gj = await r.json();
+      udbOverlay = L.geoJSON(gj, {
         style: {
-          color: "#f2b731", weight: 2,
-          fillColor: "#f2b731", fillOpacity: 0.15,
-          dashArray: "6 4",
+          color: "#4ea1ff",
+          weight: 2.5,
+          fillColor: "#4ea1ff",
+          fillOpacity: 0.06,
+          dashArray: "8 5",
         },
         interactive: false,
       }).addTo(map);
     } catch (e) {
-      console.warn("Failed to load brownfield geometry:", e);
+      console.error("UDB overlay fetch failed:", e);
+      showToast(`Failed to load UDB boundary: ${e.message}`);
+      if (els.fShowUdb) els.fShowUdb.checked = false;
     }
+  }
+
+  // Tooltip content needs HTML-safe attribute values.
+  function escapeAttr(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
   }
 
   // ------------------------------------------------------------------
@@ -967,6 +1023,8 @@
     els.fMinLandRatio?.addEventListener("input", debounce(rerun, 350));
     els.fLandHeavy?.addEventListener("change", rerun);
     els.fSatellite?.addEventListener("change", () => setBasemap(els.fSatellite.checked));
+    els.fShowBrownfields?.addEventListener("change", () => setBrownfieldOverlay(els.fShowBrownfields.checked));
+    els.fShowUdb?.addEventListener("change", () => setUdbOverlay(els.fShowUdb.checked));
     els.fExportCsv?.addEventListener("click", exportCsv);
     els.fReset.addEventListener("click", () => {
       els.fCounty.value = ""; els.fPropertyType.value = "";
@@ -981,7 +1039,6 @@
         if (els.fSearchClear) els.fSearchClear.hidden = true;
       }
       map.setView(CENTER, ZOOM);
-      clearBrownfieldOverlay();
       loadParcels();
     });
     // Golf KPI shortcut — set the property-type filter to Golf AND the

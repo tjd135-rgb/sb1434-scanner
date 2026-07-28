@@ -126,6 +126,77 @@ def list_brownfield_areas(
     return _jsonify([dict(r) for r in rows])
 
 
+@app.get("/brownfield-areas/geojson")
+def brownfield_areas_geojson(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """FeatureCollection of every brownfield-area polygon, for the
+    always-on map overlay. Geometry is ST_Simplified at ~0.0005° tolerance
+    (~55 m at Florida latitude) to keep the payload manageable — 624
+    polygons statewide could otherwise ship several MB uncompressed."""
+    rows = db.execute(
+        text(
+            """
+            SELECT area_id,
+                   area_name,
+                   county,
+                   acreage,
+                   ST_AsGeoJSON(
+                     ST_Simplify(geom, 0.0005),
+                     6
+                   )::json AS geom
+              FROM brownfield_areas
+             WHERE geom IS NOT NULL
+            """
+        )
+    ).mappings().all()
+    features = []
+    for r in rows:
+        if not r["geom"]:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": r["geom"],
+            "properties": {
+                "area_id": r["area_id"],
+                "name": r["area_name"],
+                "county": r["county"],
+                "acres": float(r["acreage"]) if r["acreage"] is not None else None,
+            },
+        })
+    return {"type": "FeatureCollection", "features": features}
+
+
+@app.get("/udb-boundary/geojson")
+def udb_boundary_geojson(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """FeatureCollection of the Miami-Dade Urban Development Boundary.
+    Typically a single polygon; served un-simplified since it's small."""
+    rows = db.execute(
+        text(
+            """
+            SELECT id,
+                   name,
+                   source,
+                   ST_AsGeoJSON(geom, 6)::json AS geom
+              FROM udb_boundary
+             WHERE geom IS NOT NULL
+            """
+        )
+    ).mappings().all()
+    features = []
+    for r in rows:
+        if not r["geom"]:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": r["geom"],
+            "properties": {
+                "id": r["id"],
+                "name": r["name"],
+                "source": r["source"],
+            },
+        })
+    return {"type": "FeatureCollection", "features": features}
+
+
 @app.get("/brownfield-areas/{area_id}")
 def get_brownfield_area(area_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
     row = db.execute(

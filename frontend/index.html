@@ -131,6 +131,16 @@
         <span>Satellite</span>
       </label>
 
+      <label class="f-check">
+        <input id="f-show-brownfields" type="checkbox" />
+        <span>Brownfield areas</span>
+      </label>
+
+      <label class="f-check">
+        <input id="f-show-udb" type="checkbox" />
+        <span>UDB boundary (MDC)</span>
+      </label>
+
       <button id="f-reset" class="btn-reset sm" type="button">Reset</button>
       <button id="f-export-csv" class="btn-export sm" type="button">Download CSV</button>
     </div>
@@ -885,11 +895,13 @@
                streets for Esri World Imagery. Streets give you addresses
                and street names; satellite shows parcel context — buildings,
                greenspace, adjacent uses.</p>
-            <p><strong>Brownfield polygon overlay</strong>: when you click a
-               parcel with an <code>env_trigger</code> that includes
-               <em>brownfield_area</em>, the FDEP area outline appears as a
-               gold semi-transparent shape. It clears when you close the
-               drawer.</p>
+            <p><strong>Overlay toggles</strong> in the filter row:
+               <em>Brownfield areas</em> loads all 624 FDEP polygons as a
+               translucent gold overlay so you can see the qualifying zones
+               at a glance; <em>UDB boundary (MDC)</em> draws the Miami-Dade
+               Urban Development Boundary as a blue dashed outline. Both
+               are lazy-loaded on first toggle and stay on the map as you
+               pan/zoom.</p>
           </div>
         </details>
 
