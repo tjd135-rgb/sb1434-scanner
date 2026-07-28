@@ -1,8 +1,8 @@
 /* SB 1434 Scanner — frontend logic.
  *
  * Zero-build vanilla JS. Fetches from /qualifying-parcels, renders one
- * Leaflet CircleMarker per row, wires filter controls, and shows a
- * per-parcel detail popup.
+ * Leaflet CircleMarker per row, and shows a per-parcel detail drawer
+ * on the right when a marker or list card is clicked.
  *
  * API base URL resolution order:
  *   1. ?api=https://... on the current URL
@@ -18,9 +18,9 @@
   // ------------------------------------------------------------------
 
   const DEFAULT_API = "https://sb1434-scanner-api.onrender.com";
-  const params = new URLSearchParams(window.location.search);
+  const urlParams = new URLSearchParams(window.location.search);
   const API_BASE = (
-    params.get("api") ||
+    urlParams.get("api") ||
     window.SB1434_API ||
     DEFAULT_API
   ).replace(/\/$/, "");
@@ -28,10 +28,13 @@
   const CENTER = [26.1, -80.2];
   const ZOOM = 10;
   const PARCEL_LIMIT = 5000;
+  const WELCOME_STORAGE_KEY = "sb1434.welcomeDismissed.v1";
+  const WATCHLIST_STORAGE_KEY = "sb1434.watchlist.v1";
 
-  // Pathway → color palette + label + short (for the floating map legend)
-  // + list-card blurb explaining the redev angle + a one-liner used in the
-  // map popup.
+  const COUNTY_NAMES = { "23": "Miami-Dade", "16": "Broward", "60": "Palm Beach" };
+
+  // Pathway → color palette + label + short (map legend) + one-liner
+  // (popup/drawer header) + longer angle (card body).
   const PATHWAY_STYLE = {
     pathway_1_golf_ringed: {
       color: "#d93b3b", label: "1 · Golf, ringed", short: "Golf (ringed)",
@@ -63,9 +66,6 @@
       one_liner: "Underperforming office on qualifying land — teardown-to-rental play.",
       angle: "Post-COVID vacancy + SB 1434 unlock = teardown-to-rental play. Verify current occupancy and lease tails.",
     },
-    // pathway_6_institutional and pathway_8_utility REMOVED — those DOR
-    // ranges are now excluded upstream in screening.py so they never
-    // reach the frontend.
     pathway_7_residential_redev: {
       color: "#3ea55c", label: "7 · Residential redev", short: "Residential redev",
       one_liner: "Existing residential 5+ acres — mobile-home park or garden apartment densification.",
@@ -103,61 +103,35 @@
     },
   };
 
-  // County-specific property-appraiser links. Direct URLs where the site
-  // supports deep-linking; search pages otherwise (user still gets to the
-  // right parcel in one more click).
   const PA_URLS = {
-    "23": {
-      label: "Miami-Dade Property Appraiser",
-      url: "https://www.miamidade.gov/pa/property_search.asp",
-    },
-    "16": {
-      label: "Broward County Property Appraiser",
-      url: "https://web.bcpa.net/BcpaClient/#/Record-Search",
-    },
-    "60": {
-      label: "Palm Beach County Property Appraiser",
-      url: "https://www.pbcgov.org/papa/",
-    },
+    "23": { label: "Miami-Dade Property Appraiser", url: "https://www.miamidade.gov/pa/property_search.asp" },
+    "16": { label: "Broward County Property Appraiser", url: "https://web.bcpa.net/BcpaClient/#/Record-Search" },
+    "60": { label: "Palm Beach County Property Appraiser", url: "https://www.pbcgov.org/papa/" },
   };
 
-  // Florida DOR use codes → human-readable property type. Reference:
-  // https://floridarevenue.com/property/Documents/DORCodes.pdf
   const DOR_USE_CODES = {
-    "001": "Single Family",       "002": "Mobile Home",
-    "003": "Multi-Family (10+)",  "004": "Condominium",
-    "005": "Cooperative",         "006": "Retirement Home",
-    "007": "Misc Residential",    "008": "Multi-Family (<10)",
-    "009": "Non-Market Residential",
-    "010": "Vacant Commercial",   "011": "Store",
-    "012": "Mixed Use Store/Office","013": "Department Store",
-    "014": "Supermarket",         "015": "Regional Mall",
-    "016": "Community Shopping Center",
-    "017": "Professional Office", "018": "Medical Office",
-    "019": "Financial Office",    "020": "Airport / Bus Terminal",
-    "021": "Restaurant",          "022": "Drive-in Restaurant",
-    "023": "Nightclub",           "024": "Bowling Alley",
-    "025": "Tourist Attraction",  "026": "Service Station",
-    "027": "Auto Sales / Repair", "028": "Parking Lot (Commercial)",
-    "029": "Wholesale Outlet",    "030": "Florist / Greenhouse",
-    "031": "Drive-in Theater",    "032": "Theater",
-    "033": "Auditorium",          "034": "Amusement Park",
-    "035": "Fairground",          "036": "Camp",
-    "037": "Racetrack",           "038": "Golf Course",
-    "039": "Hotel / Motel",       "040": "Vacant Industrial",
-    "041": "Light Manufacturing", "042": "Heavy Manufacturing",
-    "043": "Lumber Yard",         "044": "Packing Plant",
-    "045": "Cannery",             "046": "Other Food Processing",
-    "047": "Mineral Processing",  "048": "Warehouse",
+    "001": "Single Family", "002": "Mobile Home", "003": "Multi-Family (10+)",
+    "004": "Condominium", "005": "Cooperative", "006": "Retirement Home",
+    "007": "Misc Residential", "008": "Multi-Family (<10)", "009": "Non-Market Residential",
+    "010": "Vacant Commercial", "011": "Store", "012": "Mixed Use Store/Office",
+    "013": "Department Store", "014": "Supermarket", "015": "Regional Mall",
+    "016": "Community Shopping Center", "017": "Professional Office", "018": "Medical Office",
+    "019": "Financial Office", "020": "Airport / Bus Terminal", "021": "Restaurant",
+    "022": "Drive-in Restaurant", "023": "Nightclub", "024": "Bowling Alley",
+    "025": "Tourist Attraction", "026": "Service Station", "027": "Auto Sales / Repair",
+    "028": "Parking Lot (Commercial)", "029": "Wholesale Outlet", "030": "Florist / Greenhouse",
+    "031": "Drive-in Theater", "032": "Theater", "033": "Auditorium",
+    "034": "Amusement Park", "035": "Fairground", "036": "Camp",
+    "037": "Racetrack", "038": "Golf Course", "039": "Hotel / Motel",
+    "040": "Vacant Industrial", "041": "Light Manufacturing", "042": "Heavy Manufacturing",
+    "043": "Lumber Yard", "044": "Packing Plant", "045": "Cannery",
+    "046": "Other Food Processing", "047": "Mineral Processing", "048": "Warehouse",
     "049": "Open Storage",
   };
-
   function propertyType(dor_uc) {
     if (!dor_uc) return "Unknown use";
     return DOR_USE_CODES[dor_uc] || `DOR ${dor_uc}`;
   }
-
-  const COUNTY_NAMES = { "23": "Miami-Dade", "16": "Broward", "60": "Palm Beach" };
 
   // ------------------------------------------------------------------
   // DOM refs
@@ -179,11 +153,9 @@
     fRing: $("f-ring"),
     fUdb: $("f-udb"),
     fMinAcres: $("f-min-acres"),
-    fMinJv: $("f-min-jv"),
-    fMaxJv: $("f-max-jv"),
+    fMinLandRatio: $("f-min-land-ratio"),
     fLandHeavy: $("f-land-heavy"),
     fSatellite: $("f-satellite"),
-    fHeatmap: $("f-heatmap"),
     fReset: $("f-reset"),
     fExportCsv: $("f-export-csv"),
     fSearch: $("f-search"),
@@ -193,16 +165,67 @@
     listEmpty: $("list-empty"),
     welcomeBanner: $("welcome-banner"),
     welcomeDismiss: $("welcome-dismiss"),
-    welcomeIntelLink: $("welcome-intel-link"),
-    learnLink: $("learn-link"),
+    // Watchlist
+    wlToggle: $("watchlist-toggle"),
+    wlCount: $("wl-count"),
+    wlExport: $("watchlist-export"),
+    // Drawer
+    drawer: $("drawer"),
+    drawerClose: $("drawer-close"),
+    drawerBody: $("drawer-body"),
   };
 
-  // Most-recent fetched rows (server-filtered). The search box then does
-  // a client-side substring match on top of these; visibleRows is what
-  // both the map + list render from.
+  // Most-recent server-filtered rows. Search + watchlist filter narrows
+  // this on the client; visibleRows is what markers/list render.
   let lastRows = [];
   let searchQuery = "";
-  const WELCOME_STORAGE_KEY = "sb1434.welcomeDismissed.v1";
+  let watchlistFilterOn = false;
+  let currentDrawerParcel = null;
+
+  // ------------------------------------------------------------------
+  // Watchlist (localStorage-backed)
+  // ------------------------------------------------------------------
+
+  // Shape: { [parcel_id]: { added_at: iso_string, note: string } }
+  function loadWatchlist() {
+    try {
+      const raw = localStorage.getItem(WATCHLIST_STORAGE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return (parsed && typeof parsed === "object") ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  function saveWatchlist(wl) {
+    try { localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(wl)); } catch {}
+  }
+  let watchlist = loadWatchlist();
+
+  function isWatched(pid) { return !!watchlist[pid]; }
+  function toggleWatched(pid) {
+    if (!pid) return false;
+    if (watchlist[pid]) {
+      delete watchlist[pid];
+    } else {
+      watchlist[pid] = { added_at: new Date().toISOString(), note: "" };
+    }
+    saveWatchlist(watchlist);
+    updateWatchlistCount();
+    // If the watchlist filter is on and this un-star drops the parcel out,
+    // re-render to remove it from the map/list.
+    if (watchlistFilterOn) rerender();
+    return isWatched(pid);
+  }
+  function setWatchNote(pid, note) {
+    if (!pid || !watchlist[pid]) return;
+    watchlist[pid].note = note || "";
+    saveWatchlist(watchlist);
+  }
+  function updateWatchlistCount() {
+    const n = Object.keys(watchlist).length;
+    if (els.wlCount) els.wlCount.textContent = String(n);
+  }
 
   // ------------------------------------------------------------------
   // Map
@@ -210,9 +233,6 @@
 
   const map = L.map("map", { preferCanvas: true, zoomControl: true }).setView(CENTER, ZOOM);
 
-  // Two named basemap layers so a sidebar checkbox can toggle between
-  // streets (default) and Esri World Imagery satellite. Only ONE is on
-  // the map at a time.
   const baseStreets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
@@ -226,13 +246,8 @@
   );
   baseStreets.addTo(map);
 
-  // All parcel markers live in a single layer group so we can clear+re-add
-  // on every filter change without touching the tile layer.
   let markerGroup = L.layerGroup().addTo(map);
-
-  // Overlays that come and go as the user interacts.
-  let brownfieldOverlay = null;   // GeoJSON polygon of the currently-open parcel's brownfield area
-  let heatLayer = null;           // leaflet.heat layer (lazy — only if the user toggles it on)
+  let brownfieldOverlay = null;
 
   // ------------------------------------------------------------------
   // Marker rendering
@@ -240,11 +255,9 @@
 
   function radiusForAcres(acres) {
     const a = Math.max(0, Number(acres) || 0);
-    // Scale by sqrt(acres) so a 400-acre course looks 4x a 25-acre parcel.
     const r = Math.sqrt(a);
     return Math.max(5, Math.min(20, r));
   }
-
   function styleForPathway(pathway) {
     return PATHWAY_STYLE[pathway] || PATHWAY_STYLE.pathway_13_other;
   }
@@ -253,7 +266,6 @@
     const style = styleForPathway(parcel.pathway_hint);
     const isTopDeal = parcel.pathway_hint === "pathway_2_golf_not_ringed";
     const baseRadius = radiusForAcres(parcel.acres);
-    // Top deals get 30% bigger so the "gold" markers stand out.
     const radius = isTopDeal ? baseRadius * 1.3 : baseRadius;
 
     const marker = L.circleMarker(
@@ -265,60 +277,104 @@
         opacity: 1,
         fillColor: style.color,
         fillOpacity: 0.82,
-      }
+      },
     );
 
-    marker.bindPopup(() => renderPopup(parcel), {
-      maxWidth: 340,
-      className: "sb1434-popup",
-    });
-    attachBrownfieldOverlayHandlers(marker, parcel);
+    // Click a marker → open drawer (not Leaflet popup).
+    marker.on("click", () => openDrawer(parcel));
     return marker;
   }
 
-  function renderPopup(p) {
+  // ------------------------------------------------------------------
+  // Drawer (right-side detail panel)
+  // ------------------------------------------------------------------
+
+  function openDrawer(parcel) {
+    currentDrawerParcel = parcel;
+    els.drawerBody.innerHTML = renderDrawer(parcel);
+    document.body.classList.add("drawer-open");
+    els.drawer.hidden = false;
+    els.drawer.setAttribute("aria-hidden", "false");
+    // Attach the note-input listener (delegated per-parcel so we don't
+    // stack listeners across openings).
+    const noteEl = els.drawerBody.querySelector(".drawer-note");
+    if (noteEl) {
+      noteEl.addEventListener("input", debounce(() => {
+        setWatchNote(parcel.parcel_id, noteEl.value);
+      }, 250));
+    }
+    // Star toggle in the drawer.
+    const starBtn = els.drawerBody.querySelector(".drawer-star");
+    if (starBtn) {
+      starBtn.addEventListener("click", () => {
+        const on = toggleWatched(parcel.parcel_id);
+        // Re-render drawer to show/hide the note input.
+        openDrawer(parcel);
+      });
+    }
+    showBrownfieldFor(parcel);
+  }
+
+  function closeDrawer() {
+    currentDrawerParcel = null;
+    document.body.classList.remove("drawer-open");
+    // Delay hidden until after the transition so it slides out.
+    setTimeout(() => {
+      els.drawer.hidden = true;
+      els.drawer.setAttribute("aria-hidden", "true");
+    }, 220);
+    clearBrownfieldOverlay();
+  }
+
+  function renderDrawer(p) {
     const style = styleForPathway(p.pathway_hint);
+    const county = COUNTY_NAMES[p.county_fips] || p.county_fips || "—";
     const addr = addressString(p);
+    const watched = isWatched(p.parcel_id);
+    const note = watched ? (watchlist[p.parcel_id]?.note || "") : "";
     const parts = [];
 
-    parts.push('<div class="popup">');
+    // Header: property type + pathway line
+    parts.push(`<h2>${esc(propertyType(p.dor_uc))}</h2>`);
+    parts.push(`<p class="pathway-line" style="color:${style.color}">SB 1434 Pathway: ${esc(style.label)}</p>`);
+    parts.push(`<p class="owner">${esc(p.own_name || "(no owner listed)")} · ${fmtNum(p.acres, 1)} acres · ${esc(county)}</p>`);
 
-    // Two-line header: actual property type on top, SB 1434 pathway below.
-    // Property type is what's there today; pathway is the redev bucket.
+    // Star + (optional) note input
+    parts.push('<div class="drawer-star-row">');
     parts.push(
-      `<h3>${esc(propertyType(p.dor_uc))}</h3>`,
-      `<p class="pathway-line" style="color:${style.color}">SB 1434 Pathway: ${esc(style.label)}</p>`,
+      `<button class="drawer-star${watched ? " on" : ""}" type="button" title="Toggle watchlist">`,
+      `${watched ? "★" : "☆"} ${watched ? "Watchlisted" : "Add to watchlist"}`,
+      `</button>`,
     );
+    parts.push("</div>");
+    if (watched) {
+      parts.push(`<textarea class="drawer-note" placeholder="Add a note (saved locally)…">${esc(note)}</textarea>`);
+      parts.push('<div class="drawer-note-hint">Notes are stored in your browser only.</div>');
+    }
 
-    // Owner + one-line meta
-    const county = COUNTY_NAMES[p.county_fips] || p.county_fips || "—";
-    parts.push(
-      `<p class="owner">${esc(p.own_name || "(no owner listed)")} · ${fmtNum(p.acres, 1)} acres · ${esc(county)}</p>`,
-    );
-
-    // Parcel ID chip + Copy — analysts paste this into the PA site.
+    // Parcel ID chip + address
     parts.push(
       '<div class="parcel-row">',
       `<code class="parcel-id">${esc(p.parcel_id || "—")}</code>`,
-      `<button class="copy-btn" data-copy="${esc(p.parcel_id || "")}" type="button">Copy</button>`,
+      `<button class="copy-btn" type="button" data-copy="${esc(p.parcel_id || "")}">Copy</button>`,
       "</div>",
     );
     if (!addr) {
-      parts.push('<p class="no-addr">No address on file — search by parcel ID.</p>');
+      parts.push('<p class="no-addr" style="margin:-4px 0 8px">No address on file — search by parcel ID.</p>');
     } else {
-      parts.push(`<p class="owner" style="margin-top:-4px">${esc(addr)}</p>`);
+      parts.push(`<p class="owner" style="margin:-4px 0 8px">${esc(addr)}</p>`);
     }
 
-    // Value context (JV / land / land-improvement ratio)
+    // Value context
     parts.push(renderValueContext(p));
 
-    // Gate checklist — the primary "why does this qualify" answer.
+    // Gate checklist
     parts.push(renderGateChecklist(p));
 
-    // Redevelopment angle — one-liner
+    // Redevelopment angle
     if (style.one_liner) {
       parts.push('<span class="section-h">Redevelopment angle</span>');
-      parts.push(`<div class="angle">${esc(style.one_liner)}</div>`);
+      parts.push(`<div class="card-angle"><p>${esc(style.one_liner)}</p></div>`);
     }
 
     // Next steps
@@ -330,11 +386,9 @@
       parts.push("</ul></div>");
     }
 
-    // Action links — Google search + Aerial + Street View + PA
+    // Action links
     const actions = [];
-    actions.push(
-      `<a class="primary" href="${googleSearchUrl(p)}" target="_blank" rel="noopener">Search Google</a>`,
-    );
+    actions.push(`<a class="primary" href="${googleSearchUrl(p)}" target="_blank" rel="noopener">Search Google</a>`);
     const aer = aerialUrl(p);
     if (aer) actions.push(`<a href="${aer}" target="_blank" rel="noopener">🛰️ Aerial</a>`);
     const sv = streetViewUrl(p);
@@ -343,31 +397,58 @@
     if (pa) actions.push(`<a href="${pa.url}" target="_blank" rel="noopener" title="${esc(pa.label)}">County Appraiser</a>`);
     parts.push(`<div class="actions">${actions.join("")}</div>`);
 
-    parts.push("</div>");
     return parts.join("");
   }
 
-  // Currency formatter for JV / land value.
-  function fmtCurrency(v) {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return "—";
-    return "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
-  }
+  // ------------------------------------------------------------------
+  // Shared renderers (used by drawer + list card)
+  // ------------------------------------------------------------------
 
-  function renderValueContext(p) {
-    if (p.jv == null && p.lnd_val == null) return "";
-    const parts = ['<div class="value-ctx"><span class="section-h">Value</span><dl>'];
-    if (p.jv != null) parts.push(`<dt>Just value</dt><dd>${fmtCurrency(p.jv)}</dd>`);
-    if (p.lnd_val != null) parts.push(`<dt>Land value</dt><dd>${fmtCurrency(p.lnd_val)}</dd>`);
-    if (p.land_to_improvement_ratio != null) {
-      const r = Number(p.land_to_improvement_ratio);
-      const label = r >= 999 ? "Vacant / near-vacant"
-        : r >= 1 ? `${r.toFixed(2)}× (land-heavy)`
-        : r.toFixed(2) + "×";
-      parts.push(`<dt>Land/improvement</dt><dd>${esc(label)}</dd>`);
+  function gateChecklist(p) {
+    const gates = [];
+    const acres = Number(p.acres) || 0;
+    gates.push({
+      icon: acres < 6 ? "⚠️" : "✅",
+      label: "Gate 1 · 5+ acres",
+      detail: `${fmtNum(acres, 1)} acres${acres < 6 ? " (borderline — verify LND_SQFOOT)" : ""}`,
+    });
+    const county = COUNTY_NAMES[p.county_fips] || p.county_fips || "—";
+    gates.push({ icon: "✅", label: "Gate 2 · Tri-county", detail: county });
+
+    let g3 = "";
+    if (p.env_trigger === "brownfield_area") {
+      g3 = p.brownfield_area_name ? `Inside FDEP brownfield area: ${p.brownfield_area_name}` : "Inside FDEP brownfield area";
+    } else if (p.env_trigger === "cleanup_site") {
+      g3 = "Within 1,500 ft of a DEP cleanup site";
+    } else if (p.env_trigger === "both") {
+      g3 = p.brownfield_area_name
+        ? `Both — inside "${p.brownfield_area_name}" AND near a DEP cleanup site`
+        : "Both — inside a brownfield area AND near a DEP cleanup site";
+    } else {
+      g3 = "Environmental trigger present";
     }
-    parts.push("</dl></div>");
-    return parts.join("");
+    gates.push({ icon: "✅", label: "Gate 3 · Environmental trigger", detail: g3 });
+
+    if (p.adjacent_residential) {
+      gates.push({ icon: "✅", label: "Gate 4 · Residential adjacency", detail: "Residential parcel within 500 ft" });
+    } else {
+      gates.push({ icon: "ℹ️", label: "Gate 4 · Residential adjacency", detail: "Not detected in DOR data — verify via aerial view" });
+    }
+
+    const sub = [
+      { icon: "✅", text: "Not agricultural (DOR 050-069)" },
+      { icon: "✅", text: "Not government-owned public park" },
+      { icon: "✅", text: "Not within ¼ mile of a military installation" },
+      { icon: "✅", text: "Not institutional (DOR 070-079) or utility (091-097)" },
+    ];
+    if (p.udb_status) {
+      sub.push({
+        icon: p.udb_status === "inside" ? "✅" : "ℹ️",
+        text: p.udb_status === "inside" ? "Inside Miami-Dade UDB" : "Outside Miami-Dade UDB — additional entitlement friction",
+      });
+    }
+    gates.push({ icon: "✅", label: "Gate 5 · No exclusions apply", sub });
+    return gates;
   }
 
   function renderGateChecklist(p) {
@@ -393,362 +474,23 @@
     return parts.join("");
   }
 
-  function esc(s) {
-    return String(s ?? "").replace(/[&<>"']/g, (c) => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-    }[c]));
-  }
-
-  function fmtNum(v, decimals = 0) {
-    if (v == null || Number.isNaN(Number(v))) return "—";
-    return Number(v).toLocaleString(undefined, {
-      maximumFractionDigits: decimals,
-      minimumFractionDigits: decimals ? Math.min(decimals, 2) : 0,
-    });
-  }
-
-  // ------------------------------------------------------------------
-  // Filters + fetch
-  // ------------------------------------------------------------------
-
-  function currentFilters() {
-    const q = new URLSearchParams();
-    q.set("limit", String(PARCEL_LIMIT));
-    const map = {
-      county: els.fCounty.value,
-      pathway: els.fPathway.value,
-      env_trigger: els.fEnv.value,
-      ring_test_result: els.fRing.value,
-      udb_status: els.fUdb.value,
-    };
-    for (const [k, v] of Object.entries(map)) if (v) q.set(k, v);
-    const minAcres = els.fMinAcres.value.trim();
-    if (minAcres !== "") q.set("min_acres", minAcres);
-    const minJv = els.fMinJv?.value.trim();
-    if (minJv) q.set("min_jv", minJv);
-    const maxJv = els.fMaxJv?.value.trim();
-    if (maxJv) q.set("max_jv", maxJv);
-    if (els.fLandHeavy?.checked) q.set("min_land_ratio", "1.0");
-    return q;
-  }
-
-  let inflight = null;
-
-  async function loadParcels() {
-    if (inflight) inflight.abort();
-    inflight = new AbortController();
-    const q = currentFilters();
-    const url = `${API_BASE}/qualifying-parcels?${q.toString()}`;
-    showLoading(true);
-    try {
-      const r = await fetch(url, { signal: inflight.signal });
-      if (!r.ok) {
-        const detail = await r.text().catch(() => "");
-        throw new Error(`HTTP ${r.status} · ${detail.slice(0, 200)}`);
-      }
-      const rows = await r.json();
-      renderParcels(rows);
-      hideToast();
-    } catch (e) {
-      if (e.name === "AbortError") return;
-      console.error("loadParcels failed:", e);
-      showToast(`Failed to load parcels: ${e.message}`);
-      renderParcels([]);
-    } finally {
-      showLoading(false);
-      inflight = null;
+  function renderValueContext(p) {
+    if (p.jv == null && p.lnd_val == null) return "";
+    const parts = ['<div class="value-ctx"><span class="section-h">Value</span><dl>'];
+    if (p.jv != null) parts.push(`<dt>Just value</dt><dd>${fmtCurrency(p.jv)}</dd>`);
+    if (p.lnd_val != null) parts.push(`<dt>Land value</dt><dd>${fmtCurrency(p.lnd_val)}</dd>`);
+    if (p.land_to_improvement_ratio != null) {
+      const r = Number(p.land_to_improvement_ratio);
+      const label = r >= 999 ? "Vacant / near-vacant"
+        : r >= 1 ? `${r.toFixed(2)}× (land-heavy)` : r.toFixed(2) + "×";
+      parts.push(`<dt>Land/improvement</dt><dd>${esc(label)}</dd>`);
     }
-  }
-
-  function renderParcels(rows) {
-    lastRows = rows;
-    rerender();
-  }
-
-  // Client-side search filter applied on top of the server-side filters.
-  // Substring match, case-insensitive, on parcel_id + owner name.
-  function applySearch(rows) {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((p) => {
-      const pid = String(p.parcel_id || "").toLowerCase();
-      const owner = String(p.own_name || "").toLowerCase();
-      return pid.includes(q) || owner.includes(q);
-    });
-  }
-
-  function rerender() {
-    const rows = applySearch(lastRows);
-    markerGroup.clearLayers();
-    let totalAcres = 0;
-    let adjacentCount = 0;
-    let golfCount = 0;
-    for (const p of rows) {
-      if (p.latitude == null || p.longitude == null) continue;
-      markerGroup.addLayer(makeMarker(p));
-      totalAcres += Number(p.acres) || 0;
-      if (p.adjacent_residential) adjacentCount += 1;
-      if (p.pathway_hint === "pathway_2_golf_not_ringed") golfCount += 1;
-    }
-    els.kpiCount.textContent = fmtNum(rows.length);
-    els.kpiAcres.textContent = fmtNum(totalAcres, 0);
-    els.kpiAdjacent.textContent = fmtNum(adjacentCount);
-    if (els.kpiGolf) els.kpiGolf.textContent = fmtNum(golfCount);
-    renderList(rows);
-    // Recompute heat layer if it's on — new filter/search set = new
-    // intensity distribution.
-    if (els.fHeatmap?.checked) rebuildHeatmap();
-
-    // Search-affordance: if exactly one row matches, zoom to it and pop.
-    if (searchQuery.trim() && rows.length === 1 && rows[0].latitude != null) {
-      const p = rows[0];
-      map.setView([p.latitude, p.longitude], 16, { animate: true });
-      // Give Leaflet a beat to finish the zoom before opening the popup
-      // (openPopup during a pan can race).
-      setTimeout(() => {
-        const marker = findMarkerFor(p);
-        if (marker) marker.openPopup();
-      }, 250);
-    }
-  }
-
-  function findMarkerFor(parcel) {
-    let hit = null;
-    markerGroup.eachLayer((layer) => {
-      const ll = layer.getLatLng ? layer.getLatLng() : null;
-      if (!ll) return;
-      if (Math.abs(ll.lat - parcel.latitude) < 1e-6 &&
-          Math.abs(ll.lng - parcel.longitude) < 1e-6) {
-        hit = layer;
-      }
-    });
-    return hit;
-  }
-
-  // ------------------------------------------------------------------
-  // List view
-  // ------------------------------------------------------------------
-
-  function renderList(rows) {
-    els.listCount.textContent = fmtNum(rows.length);
-    els.listEmpty.classList.toggle("hidden", rows.length > 0);
-    // Build the entire DOM once, then swap in — avoids reflow-per-card.
-    const frag = document.createDocumentFragment();
-    for (const p of rows) frag.appendChild(makeCard(p));
-    els.listContainer.replaceChildren(frag);
-  }
-
-  function addressString(p) {
-    const addr = String(p.phy_addr1 || "").trim();
-    const city = String(p.phy_city || "").trim();
-    const zip = String(p.phy_zipcd || "").trim();
-    if (!addr && !city && !zip) return null;
-    const parts = [];
-    if (addr) parts.push(addr);
-    if (city) parts.push(city);
-    if (city || zip) parts.push("FL");
-    if (zip) parts.push(zip);
-    return parts.join(", ");
-  }
-
-  function googleSearchUrl(p) {
-    const addr = addressString(p);
-    const q = addr
-      ? `${addr} ${p.own_name || ""}`.trim()
-      : `${p.parcel_id || ""} ${COUNTY_NAMES[p.county_fips] || ""} FL property appraiser`;
-    return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
-  }
-
-  function aerialUrl(p) {
-    // !1e3 = Google Maps satellite/hybrid. Previous value (!1e1) opened
-    // Street View which shows "No imagery available" on large rural or
-    // industrial parcels — useless for the actual aerial context we want.
-    if (p.latitude == null || p.longitude == null) return null;
-    return `https://www.google.com/maps/@${p.latitude},${p.longitude},17z/data=!3m1!1e3`;
-  }
-
-  function streetViewUrl(p) {
-    if (p.latitude == null || p.longitude == null) return null;
-    // Google's Street View deep-link. Some rural parcels have no
-    // coverage — the destination page will say so.
-    return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${p.latitude},${p.longitude}`;
-  }
-
-  function paLink(p) {
-    return PA_URLS[p.county_fips] || null;
-  }
-
-  // Build the five-gate qualification checklist shown in popups + cards.
-  // Each entry: { icon: '✅' | 'ℹ️' | '⚠️', label, detail?, sub? }.
-  function gateChecklist(p) {
-    const gates = [];
-
-    // Gate 1: 5+ acres
-    const acres = Number(p.acres) || 0;
-    gates.push({
-      icon: acres < 6 ? "⚠️" : "✅",
-      label: "Gate 1 · 5+ acres",
-      detail: `${fmtNum(acres, 1)} acres${acres < 6 ? " (borderline — verify LND_SQFOOT)" : ""}`,
-    });
-
-    // Gate 2: tri-county
-    const county = COUNTY_NAMES[p.county_fips] || p.county_fips || "—";
-    gates.push({
-      icon: "✅",
-      label: "Gate 2 · Tri-county",
-      detail: county,
-    });
-
-    // Gate 3: environmental trigger
-    let g3detail = "";
-    if (p.env_trigger === "brownfield_area") {
-      g3detail = p.brownfield_area_name
-        ? `Inside FDEP brownfield area: ${p.brownfield_area_name}`
-        : "Inside FDEP brownfield area";
-    } else if (p.env_trigger === "cleanup_site") {
-      g3detail = "Within 1,500 ft of a DEP cleanup site";
-    } else if (p.env_trigger === "both") {
-      g3detail = p.brownfield_area_name
-        ? `Both — inside "${p.brownfield_area_name}" AND near a DEP cleanup site`
-        : "Both — inside a brownfield area AND near a DEP cleanup site";
-    } else {
-      g3detail = "Environmental trigger present";
-    }
-    gates.push({
-      icon: "✅",
-      label: "Gate 3 · Environmental trigger",
-      detail: g3detail,
-    });
-
-    // Gate 4: residential adjacency
-    if (p.adjacent_residential) {
-      gates.push({
-        icon: "✅",
-        label: "Gate 4 · Residential adjacency",
-        detail: "Residential parcel within 500 ft",
-      });
-    } else {
-      gates.push({
-        icon: "ℹ️",
-        label: "Gate 4 · Residential adjacency",
-        detail: "Not detected in DOR data — verify via aerial view",
-      });
-    }
-
-    // Gate 5: composite of exclusions (all passed by definition — parcel
-    // is here). Sub-bullets show what was checked.
-    const sub = [
-      { icon: "✅", text: "Not agricultural (DOR 050-069)" },
-      { icon: "✅", text: "Not government-owned public park" },
-      { icon: "✅", text: "Not within ¼ mile of a military installation" },
-      { icon: "✅", text: "Not institutional (DOR 070-079) or utility (091-097)" },
-    ];
-    if (p.udb_status) {
-      sub.push({
-        icon: p.udb_status === "inside" ? "✅" : "ℹ️",
-        text: p.udb_status === "inside"
-          ? "Inside Miami-Dade UDB"
-          : "Outside Miami-Dade UDB — additional entitlement friction",
-      });
-    }
-    gates.push({
-      icon: "✅",
-      label: "Gate 5 · No exclusions apply",
-      sub,
-    });
-
-    return gates;
-  }
-
-  function qualifyingReasons(p) {
-    const reasons = [];
-
-    // Acreage — every qualifying parcel is ≥ 5 acres, but showing the
-    // actual number here anchors the popup's "what am I looking at" answer.
-    if (p.acres != null) {
-      reasons.push({
-        kind: "ok",
-        text: `${fmtNum(p.acres, 1)} acres (Gate 1 · minimum 5 required)`,
-      });
-    }
-
-    // Gate 3 — environmental trigger
-    if (p.env_trigger === "brownfield_area" || p.env_trigger === "both") {
-      const name = p.brownfield_area_name ? ` "${p.brownfield_area_name}"` : "";
-      reasons.push({
-        kind: "ok",
-        text: `Inside FDEP brownfield area${name} (Trigger B)`,
-      });
-    }
-    if (p.env_trigger === "cleanup_site" || p.env_trigger === "both") {
-      reasons.push({
-        kind: "ok",
-        text: "Within 1,500 ft of a DEP cleanup site (Trigger A)",
-      });
-    }
-
-    // Gate 4 — adjacency. When we don't detect a residential neighbor in
-    // the DOR data, the parcel STILL qualifies (screening only surfaces
-    // rows that passed all five statutory gates at run time); the missing
-    // signal is a data-quality caveat, not a disqualification. Show it as
-    // a neutral note (blue), not an orange warning.
-    if (p.adjacent_residential) {
-      reasons.push({
-        kind: "ok",
-        text: "Residential parcel within 500 ft (Gate 4 ✓)",
-      });
-    } else {
-      reasons.push({
-        kind: "note",
-        text:
-          "Residential adjacency not detected in DOR data. This parcel " +
-          "still qualifies under all five statutory gates — verify adjacency " +
-          "via aerial view. DOR records may not capture every residential use.",
-      });
-    }
-
-    // Gate 5C — Miami-Dade UDB
-    if (p.udb_status) {
-      const inside = p.udb_status === "inside";
-      reasons.push({
-        kind: inside ? "ok" : "info",
-        text: inside
-          ? "Inside Miami-Dade Urban Development Boundary"
-          : "Outside Miami-Dade UDB — expect additional entitlement friction",
-      });
-    }
-
-    // Ring test detail for golf
-    if (p.ring_test_result) {
-      const pct = p.ring_test_pct != null ? `${Math.round(p.ring_test_pct)}%` : "?";
-      const label =
-        p.ring_test_result === "not_ringed"
-          ? `Ring test ${pct} → NOT ringed — overlay does not apply`
-          : p.ring_test_result === "ringed"
-          ? `Ring test ${pct} → ringed — overlay applies`
-          : `Ring test ${pct} → partially ringed — review`;
-      reasons.push({
-        kind: p.ring_test_result === "not_ringed" ? "ok" : "info",
-        text: label,
-      });
-    }
-
-    // Utility flag warning (real warning — this one is actionable).
-    if (p.utility_flag) {
-      reasons.push({
-        kind: "warn",
-        text: "Utility flag set — 15-year title lookback REQUIRED before proceeding",
-      });
-    }
-
-    return reasons;
+    parts.push("</dl></div>");
+    return parts.join("");
   }
 
   function nextStepsFor(p) {
     const steps = [];
-    if (p.utility_flag) {
-      steps.push("Order a 15-year title history to confirm prior utility use — parcels ever owned by a public utility are excluded under §163.2525(4)(e).");
-    }
     if (p.ring_test_result === "partially_ringed") {
       const pct = p.ring_test_pct != null ? Math.round(p.ring_test_pct) : null;
       steps.push(
@@ -770,9 +512,169 @@
     if (p.pathway_hint === "pathway_2_golf_not_ringed") {
       steps.push("Top-tier golf opportunity — no SB 1434 overlay applies. Explore whether existing golf-course residential entitlements can be layered onto the unlock.");
     }
-    // Always the last step — the visual sanity check every deal deserves.
     steps.push("Review aerial imagery before investing more time (link in the Actions bar below).");
     return steps;
+  }
+
+  // ------------------------------------------------------------------
+  // Address / URL helpers
+  // ------------------------------------------------------------------
+
+  function addressString(p) {
+    const addr = String(p.phy_addr1 || "").trim();
+    const city = String(p.phy_city || "").trim();
+    const zip = String(p.phy_zipcd || "").trim();
+    if (!addr && !city && !zip) return null;
+    const parts = [];
+    if (addr) parts.push(addr);
+    if (city) parts.push(city);
+    if (city || zip) parts.push("FL");
+    if (zip) parts.push(zip);
+    return parts.join(", ");
+  }
+  function googleSearchUrl(p) {
+    const addr = addressString(p);
+    const q = addr
+      ? `${addr} ${p.own_name || ""}`.trim()
+      : `${p.parcel_id || ""} ${COUNTY_NAMES[p.county_fips] || ""} FL property appraiser`;
+    return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+  }
+  function aerialUrl(p) {
+    if (p.latitude == null || p.longitude == null) return null;
+    return `https://www.google.com/maps/@${p.latitude},${p.longitude},17z/data=!3m1!1e3`;
+  }
+  function streetViewUrl(p) {
+    if (p.latitude == null || p.longitude == null) return null;
+    return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${p.latitude},${p.longitude}`;
+  }
+  function paLink(p) { return PA_URLS[p.county_fips] || null; }
+
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+  function fmtNum(v, decimals = 0) {
+    if (v == null || Number.isNaN(Number(v))) return "—";
+    return Number(v).toLocaleString(undefined, {
+      maximumFractionDigits: decimals,
+      minimumFractionDigits: decimals ? Math.min(decimals, 2) : 0,
+    });
+  }
+  function fmtCurrency(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    return "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+  function debounce(fn, ms) {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  }
+
+  // ------------------------------------------------------------------
+  // Filters + fetch
+  // ------------------------------------------------------------------
+
+  function currentFilters() {
+    const q = new URLSearchParams();
+    q.set("limit", String(PARCEL_LIMIT));
+    const mapping = {
+      county: els.fCounty.value,
+      pathway: els.fPathway.value,
+      env_trigger: els.fEnv.value,
+      ring_test_result: els.fRing.value,
+      udb_status: els.fUdb.value,
+    };
+    for (const [k, v] of Object.entries(mapping)) if (v) q.set(k, v);
+    const minAcres = els.fMinAcres.value.trim();
+    if (minAcres !== "") q.set("min_acres", minAcres);
+    const mr = els.fMinLandRatio?.value.trim();
+    if (mr) q.set("min_land_ratio", mr);
+    // Land-heavy shortcut wins over the numeric field when both set.
+    if (els.fLandHeavy?.checked) q.set("min_land_ratio", "1.0");
+    return q;
+  }
+
+  let inflight = null;
+  async function loadParcels() {
+    if (inflight) inflight.abort();
+    inflight = new AbortController();
+    const q = currentFilters();
+    const url = `${API_BASE}/qualifying-parcels?${q.toString()}`;
+    showLoading(true);
+    try {
+      const r = await fetch(url, { signal: inflight.signal });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => "");
+        throw new Error(`HTTP ${r.status} · ${detail.slice(0, 200)}`);
+      }
+      const rows = await r.json();
+      lastRows = rows;
+      hideToast();
+      rerender();
+    } catch (e) {
+      if (e.name === "AbortError") return;
+      console.error("loadParcels failed:", e);
+      showToast(`Failed to load parcels: ${e.message}`);
+      lastRows = [];
+      rerender();
+    } finally {
+      showLoading(false);
+      inflight = null;
+    }
+  }
+
+  function applyClientFilters(rows) {
+    const q = searchQuery.trim().toLowerCase();
+    let out = rows;
+    if (q) {
+      out = out.filter((p) => {
+        const pid = String(p.parcel_id || "").toLowerCase();
+        const owner = String(p.own_name || "").toLowerCase();
+        return pid.includes(q) || owner.includes(q);
+      });
+    }
+    if (watchlistFilterOn) {
+      out = out.filter((p) => isWatched(p.parcel_id));
+    }
+    return out;
+  }
+
+  function rerender() {
+    const rows = applyClientFilters(lastRows);
+    markerGroup.clearLayers();
+    let totalAcres = 0, adjacentCount = 0, golfCount = 0;
+    for (const p of rows) {
+      if (p.latitude == null || p.longitude == null) continue;
+      markerGroup.addLayer(makeMarker(p));
+      totalAcres += Number(p.acres) || 0;
+      if (p.adjacent_residential) adjacentCount += 1;
+      if (p.pathway_hint === "pathway_2_golf_not_ringed") golfCount += 1;
+    }
+    els.kpiCount.textContent = fmtNum(rows.length);
+    els.kpiAcres.textContent = fmtNum(totalAcres, 0);
+    els.kpiAdjacent.textContent = fmtNum(adjacentCount);
+    if (els.kpiGolf) els.kpiGolf.textContent = fmtNum(golfCount);
+    renderList(rows);
+
+    // Zoom-to-single-match affordance from the search box.
+    if (searchQuery.trim() && rows.length === 1 && rows[0].latitude != null) {
+      const p = rows[0];
+      map.setView([p.latitude, p.longitude], 16, { animate: true });
+      setTimeout(() => openDrawer(p), 300);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // List view
+  // ------------------------------------------------------------------
+
+  function renderList(rows) {
+    els.listCount.textContent = fmtNum(rows.length);
+    els.listEmpty.classList.toggle("hidden", rows.length > 0);
+    const frag = document.createDocumentFragment();
+    for (const p of rows) frag.appendChild(makeCard(p));
+    els.listContainer.replaceChildren(frag);
   }
 
   function makeCard(p) {
@@ -780,25 +682,26 @@
     const county = COUNTY_NAMES[p.county_fips] || p.county_fips || "—";
     const addr = addressString(p);
     const isTopDeal = p.pathway_hint === "pathway_2_golf_not_ringed";
+    const watched = isWatched(p.parcel_id);
 
     const card = document.createElement("article");
     card.className = "card" + (isTopDeal ? " card-top" : "");
     card.style.borderLeftColor = style.color;
 
     const parts = [];
-
-    // Two-line header: property type + pathway line + meta
     parts.push('<div class="card-head">');
     parts.push(
       `<div class="card-title-block">`,
       `<h3 class="card-title">${esc(propertyType(p.dor_uc))}</h3>`,
       `<div class="card-pathway" style="color:${style.color}">SB 1434 Pathway: ${esc(style.label)}</div>`,
       `</div>`,
+      `<div style="display:flex; align-items:center; gap:6px;">`,
+      `<span class="card-meta">${fmtNum(p.acres, 1)} acres · ${esc(county)}</span>`,
+      `<button class="card-star${watched ? " on" : ""}" type="button" data-star="${esc(p.parcel_id || "")}" title="Toggle watchlist">${watched ? "★" : "☆"}</button>`,
+      `</div>`,
     );
-    parts.push(`<span class="card-meta">${fmtNum(p.acres, 1)} acres · ${esc(county)}</span>`);
     parts.push("</div>");
 
-    // Owner + address + parcel id
     parts.push(`<p class="card-owner">${esc(p.own_name || "(no owner listed)")}</p>`);
     const idLine = [
       `<span class="mono">${esc(p.parcel_id || "—")}</span>`,
@@ -807,199 +710,53 @@
     ].filter(Boolean).join(" · ");
     parts.push(`<p class="card-id">${idLine}</p>`);
 
-    // Value context (JV / land / land-improvement ratio)
     parts.push(renderValueContext(p));
-
-    // Gate checklist
     parts.push(renderGateChecklist(p));
 
-    // Redevelopment angle
     if (style.angle) {
       parts.push(
-        '<div class="card-angle">',
-        '<span class="section-h">Redevelopment angle</span>',
-        `<p>${esc(style.angle)}</p>`,
-        "</div>",
+        '<div class="card-angle"><span class="section-h">Redevelopment angle</span>',
+        `<p>${esc(style.angle)}</p></div>`,
       );
     }
 
-    // Actions
+    // Actions — no primary "Search Google" here; the whole card opens the
+    // drawer, and Search-Google lives inside the drawer.
     const actions = [];
-    actions.push(
-      `<a class="btn primary" href="${googleSearchUrl(p)}" target="_blank" rel="noopener">Search Google</a>`,
-    );
     const aer = aerialUrl(p);
     if (aer) actions.push(`<a class="btn" href="${aer}" target="_blank" rel="noopener">🛰️ Aerial</a>`);
     const sv = streetViewUrl(p);
     if (sv) actions.push(`<a class="btn" href="${sv}" target="_blank" rel="noopener">🚗 Street View</a>`);
     const pa = paLink(p);
-    if (pa) {
-      actions.push(
-        `<a class="btn" href="${pa.url}" target="_blank" rel="noopener" title="${esc(pa.label)}">County Appraiser</a>`,
-      );
-    }
-    actions.push(
-      `<button class="btn copy-btn" type="button" data-copy="${esc(p.parcel_id || "")}">Copy Parcel ID</button>`,
-    );
+    if (pa) actions.push(`<a class="btn" href="${pa.url}" target="_blank" rel="noopener" title="${esc(pa.label)}">County Appraiser</a>`);
+    actions.push(`<button class="btn copy-btn" type="button" data-copy="${esc(p.parcel_id || "")}">Copy Parcel ID</button>`);
     parts.push(`<div class="card-actions">${actions.join("")}</div>`);
 
     card.innerHTML = parts.join("");
 
-    // Whole card is a click-target — outside links + buttons — opens
-    // the Google search in a new tab.
+    // Whole card is a click-target — outside links, star, copy — opens drawer.
     card.addEventListener("click", (e) => {
       if (e.target.closest("a, button")) return;
-      window.open(googleSearchUrl(p), "_blank", "noopener");
+      openDrawer(p);
     });
+
+    // Star toggle wired inline (avoids relying on global delegation
+    // ordering with other click handlers).
+    const starBtn = card.querySelector(".card-star");
+    if (starBtn) {
+      starBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const nowOn = toggleWatched(p.parcel_id);
+        starBtn.classList.toggle("on", nowOn);
+        starBtn.textContent = nowOn ? "★" : "☆";
+      });
+    }
 
     return card;
   }
 
   // ------------------------------------------------------------------
-  // UI wiring
-  // ------------------------------------------------------------------
-
-  function debounce(fn, ms) {
-    let t;
-    return (...args) => {
-      clearTimeout(t);
-      t = setTimeout(() => fn(...args), ms);
-    };
-  }
-
-  function initFilters() {
-    const rerun = () => loadParcels();
-    ["fCounty", "fPathway", "fEnv", "fRing", "fUdb"].forEach((k) => {
-      els[k].addEventListener("change", rerun);
-    });
-    els.fMinAcres.addEventListener("input", debounce(rerun, 350));
-    els.fMinJv?.addEventListener("input", debounce(rerun, 350));
-    els.fMaxJv?.addEventListener("input", debounce(rerun, 350));
-    els.fLandHeavy?.addEventListener("change", rerun);
-    els.fSatellite?.addEventListener("change", () => setBasemap(els.fSatellite.checked));
-    els.fHeatmap?.addEventListener("change", () => setHeatmap(els.fHeatmap.checked));
-    els.fExportCsv?.addEventListener("click", exportCsv);
-    els.fReset.addEventListener("click", () => {
-      els.fCounty.value = "";
-      els.fPathway.value = "";
-      els.fEnv.value = "";
-      els.fRing.value = "";
-      els.fUdb.value = "";
-      els.fMinAcres.value = "";
-      if (els.fMinJv) els.fMinJv.value = "";
-      if (els.fMaxJv) els.fMaxJv.value = "";
-      if (els.fLandHeavy) els.fLandHeavy.checked = false;
-      // Clear the search too — reset means reset EVERYTHING.
-      if (els.fSearch) {
-        els.fSearch.value = "";
-        searchQuery = "";
-        if (els.fSearchClear) els.fSearchClear.hidden = true;
-      }
-      // Recenter the map to the tri-county default so a user who zoomed
-      // in on one result via the search box gets a clean slate.
-      map.setView(CENTER, ZOOM);
-      clearBrownfieldOverlay();
-      loadParcels();
-    });
-
-    // Golf Opportunities KPI acts as a shortcut to the Pathway 2 filter.
-    els.kpiGolf?.parentElement?.addEventListener("click", () => {
-      els.fPathway.value = "pathway_2_golf_not_ringed";
-      loadParcels();
-    });
-  }
-
-  // Floating map legend as a Leaflet control (bottom-right, collapsible).
-  function initLegend() {
-    const legendControl = L.control({ position: "bottomright" });
-    legendControl.onAdd = () => {
-      const div = L.DomUtil.create("div", "map-legend");
-      const rows = Object.entries(PATHWAY_STYLE)
-        .map(
-          ([key, style]) => `
-            <li data-pathway="${key}">
-              <span class="swatch${style.star ? " star" : ""}" style="background:${style.color}"></span>
-              <span>${esc(style.short || style.label)}</span>
-            </li>`,
-        )
-        .join("");
-      div.innerHTML = `
-        <div class="map-legend-head">
-          <span>Pathway legend</span>
-          <span class="map-legend-caret">▾</span>
-        </div>
-        <ul class="map-legend-list">${rows}</ul>
-      `;
-      // Clicks/scrolls inside the legend shouldn't pan the map.
-      L.DomEvent.disableClickPropagation(div);
-      L.DomEvent.disableScrollPropagation(div);
-      // Header toggles collapse
-      div.querySelector(".map-legend-head").addEventListener("click", () => {
-        div.classList.toggle("collapsed");
-      });
-      // Item click filters by that pathway
-      div.querySelectorAll(".map-legend-list li").forEach((li) => {
-        li.addEventListener("click", (e) => {
-          e.stopPropagation();
-          els.fPathway.value = li.dataset.pathway;
-          loadParcels();
-        });
-      });
-      return div;
-    };
-    legendControl.addTo(map);
-  }
-
-  // ------------------------------------------------------------------
-  // Welcome banner (localStorage-backed dismissal)
-  // ------------------------------------------------------------------
-
-  function initWelcomeBanner() {
-    if (!els.welcomeBanner) return;
-    let dismissed = false;
-    try {
-      dismissed = localStorage.getItem(WELCOME_STORAGE_KEY) === "1";
-    } catch { /* private-mode / storage disabled — ignore */ }
-    els.welcomeBanner.hidden = dismissed;
-
-    els.welcomeDismiss?.addEventListener("click", () => {
-      els.welcomeBanner.hidden = true;
-      try { localStorage.setItem(WELCOME_STORAGE_KEY, "1"); } catch {}
-    });
-    els.welcomeIntelLink?.addEventListener("click", (e) => {
-      e.preventDefault();
-      switchToView("how");
-    });
-  }
-
-  // ------------------------------------------------------------------
-  // Search (client-side substring match on lastRows)
-  // ------------------------------------------------------------------
-
-  function initSearch() {
-    const onInput = debounce(() => {
-      searchQuery = els.fSearch.value || "";
-      els.fSearchClear.hidden = !searchQuery;
-      rerender();
-    }, 200);
-    els.fSearch.addEventListener("input", onInput);
-    els.fSearch.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        els.fSearch.value = "";
-        onInput();
-      }
-    });
-    els.fSearchClear.addEventListener("click", () => {
-      els.fSearch.value = "";
-      searchQuery = "";
-      els.fSearchClear.hidden = true;
-      rerender();
-      els.fSearch.focus();
-    });
-  }
-
-  // ------------------------------------------------------------------
-  // Basemap toggle (OSM streets ↔ Esri satellite)
+  // Basemap toggle
   // ------------------------------------------------------------------
 
   function setBasemap(satellite) {
@@ -1013,57 +770,7 @@
   }
 
   // ------------------------------------------------------------------
-  // Value heat map (Leaflet.heat plugin, loaded from CDN)
-  // ------------------------------------------------------------------
-
-  function setHeatmap(on) {
-    if (!on) {
-      if (heatLayer) {
-        map.removeLayer(heatLayer);
-        heatLayer = null;
-      }
-      return;
-    }
-    if (typeof L.heatLayer !== "function") {
-      showToast("Heat map plugin not loaded — check console");
-      els.fHeatmap.checked = false;
-      return;
-    }
-    rebuildHeatmap();
-  }
-
-  function rebuildHeatmap() {
-    if (!els.fHeatmap?.checked || typeof L.heatLayer !== "function") return;
-    if (heatLayer) {
-      map.removeLayer(heatLayer);
-      heatLayer = null;
-    }
-    const rows = applySearch(lastRows);
-    // Normalize JV to 0..1 across the visible set so the heat scale
-    // adapts to whatever the current filter surfaces.
-    let maxJv = 0;
-    for (const p of rows) {
-      const v = Number(p.jv) || 0;
-      if (v > maxJv) maxJv = v;
-    }
-    if (maxJv <= 0) return;
-    const points = [];
-    for (const p of rows) {
-      if (p.latitude == null || p.longitude == null) continue;
-      const v = Number(p.jv) || 0;
-      if (v <= 0) continue;
-      points.push([p.latitude, p.longitude, v / maxJv]);
-    }
-    heatLayer = L.heatLayer(points, {
-      radius: 22,
-      blur: 18,
-      minOpacity: 0.35,
-      maxZoom: 15,
-    }).addTo(map);
-  }
-
-  // ------------------------------------------------------------------
-  // Brownfield polygon overlay (fetched on-demand when a parcel opens)
+  // Brownfield polygon overlay
   // ------------------------------------------------------------------
 
   function clearBrownfieldOverlay() {
@@ -1072,24 +779,19 @@
       brownfieldOverlay = null;
     }
   }
-
   async function showBrownfieldFor(parcel) {
     clearBrownfieldOverlay();
     if (!parcel.brownfield_area_id) return;
     try {
-      const r = await fetch(
-        `${API_BASE}/brownfield-areas/${encodeURIComponent(parcel.brownfield_area_id)}`,
-      );
+      const r = await fetch(`${API_BASE}/brownfield-areas/${encodeURIComponent(parcel.brownfield_area_id)}`);
       if (!r.ok) return;
       const detail = await r.json();
       const geom = detail.geometry;
       if (!geom) return;
       brownfieldOverlay = L.geoJSON(geom, {
         style: {
-          color: "#f2b731",
-          weight: 2,
-          fillColor: "#f2b731",
-          fillOpacity: 0.15,
+          color: "#f2b731", weight: 2,
+          fillColor: "#f2b731", fillOpacity: 0.15,
           dashArray: "6 4",
         },
         interactive: false,
@@ -1097,13 +799,6 @@
     } catch (e) {
       console.warn("Failed to load brownfield geometry:", e);
     }
-  }
-
-  // Hook into popup open/close on every marker after the layer group
-  // rebuilds — attached inside makeMarker via bindPopup handlers.
-  function attachBrownfieldOverlayHandlers(marker, parcel) {
-    marker.on("popupopen", () => showBrownfieldFor(parcel));
-    marker.on("popupclose", () => clearBrownfieldOverlay());
   }
 
   // ------------------------------------------------------------------
@@ -1127,44 +822,59 @@
     if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
     return s;
   }
-
-  function exportCsv() {
-    const rows = applySearch(lastRows);
-    if (rows.length === 0) {
-      showToast("No parcels to export with current filters");
-      return;
-    }
-    const header = CSV_COLUMNS.join(",");
+  function stampToday() {
+    const now = new Date();
+    return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+  }
+  function rowsToCsv(rows, extraCols) {
+    const cols = extraCols ? [...CSV_COLUMNS, ...extraCols] : CSV_COLUMNS;
+    const header = cols.join(",");
     const body = rows.map((p) => {
       const enriched = {
         ...p,
         county_name: COUNTY_NAMES[p.county_fips] || "",
         property_type: propertyType(p.dor_uc),
+        note: watchlist[p.parcel_id]?.note || "",
+        watchlisted_at: watchlist[p.parcel_id]?.added_at || "",
       };
-      return CSV_COLUMNS.map((c) => csvEscape(enriched[c])).join(",");
+      return cols.map((c) => csvEscape(enriched[c])).join(",");
     }).join("\r\n");
-    const csv = header + "\r\n" + body + "\r\n";
-    // Manually build a YYYYMMDD stamp — Date.now() is unavailable in some
-    // sandboxes and toISOString() is universal.
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-    const filename = `sb1434_qualifying_parcels_${y}${m}${d}.csv`;
-
+    return header + "\r\n" + body + "\r\n";
+  }
+  function downloadCsv(csv, filename) {
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 500);
+  }
+  function exportCsv() {
+    const rows = applyClientFilters(lastRows);
+    if (rows.length === 0) { showToast("No parcels to export with current filters"); return; }
+    downloadCsv(rowsToCsv(rows), `sb1434_qualifying_parcels_${stampToday()}.csv`);
+  }
+  function exportWatchlistCsv() {
+    // Watchlist can contain parcels that aren't in the current fetch —
+    // export from every row we've ever seen this session AND any pinned
+    // parcels we can find in lastRows. For anything else, emit an ID-only
+    // stub so the user still gets the parcel_id + their note.
+    const seen = new Map();
+    for (const p of lastRows) if (isWatched(p.parcel_id)) seen.set(p.parcel_id, p);
+    const stubs = [];
+    for (const pid of Object.keys(watchlist)) {
+      if (!seen.has(pid)) stubs.push({ parcel_id: pid });
+    }
+    const rows = [...seen.values(), ...stubs];
+    if (rows.length === 0) { showToast("Watchlist is empty"); return; }
+    downloadCsv(
+      rowsToCsv(rows, ["watchlisted_at", "note"]),
+      `sb1434_watchlist_${stampToday()}.csv`,
+    );
   }
 
   // ------------------------------------------------------------------
-  // Copy-parcel-ID buttons (both popups + list cards, delegated globally)
+  // Copy delegation
   // ------------------------------------------------------------------
 
   function initCopyDelegation() {
@@ -1178,54 +888,141 @@
         const prev = btn.textContent;
         btn.classList.add("copied");
         btn.textContent = "Copied ✓";
-        setTimeout(() => {
-          btn.classList.remove("copied");
-          btn.textContent = prev;
-        }, 1200);
+        setTimeout(() => { btn.classList.remove("copied"); btn.textContent = prev; }, 1200);
       };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
+      if (navigator.clipboard?.writeText) {
         navigator.clipboard.writeText(val).then(done, done);
       } else {
-        // Fallback for browsers/insecure origins without the Clipboard API.
         const ta = document.createElement("textarea");
-        ta.value = val;
-        document.body.appendChild(ta);
-        ta.select();
+        ta.value = val; document.body.appendChild(ta); ta.select();
         try { document.execCommand("copy"); } catch {}
-        document.body.removeChild(ta);
-        done();
+        document.body.removeChild(ta); done();
       }
     });
   }
 
-  function initApiBadge() {
-    // Show host only — the full URL is noisy for a badge.
-    try {
-      const u = new URL(API_BASE);
-      els.apiBadge.textContent = `API: ${u.host}`;
-      els.apiBadge.title = API_BASE;
-    } catch {
-      els.apiBadge.textContent = `API: ${API_BASE}`;
-    }
+  // ------------------------------------------------------------------
+  // UI wiring
+  // ------------------------------------------------------------------
+
+  function initFilters() {
+    const rerun = () => loadParcels();
+    ["fCounty", "fPathway", "fEnv", "fRing", "fUdb"].forEach((k) => {
+      els[k].addEventListener("change", rerun);
+    });
+    els.fMinAcres.addEventListener("input", debounce(rerun, 350));
+    els.fMinLandRatio?.addEventListener("input", debounce(rerun, 350));
+    els.fLandHeavy?.addEventListener("change", rerun);
+    els.fSatellite?.addEventListener("change", () => setBasemap(els.fSatellite.checked));
+    els.fExportCsv?.addEventListener("click", exportCsv);
+    els.fReset.addEventListener("click", () => {
+      els.fCounty.value = ""; els.fPathway.value = "";
+      els.fEnv.value = ""; els.fRing.value = ""; els.fUdb.value = "";
+      els.fMinAcres.value = "";
+      if (els.fMinLandRatio) els.fMinLandRatio.value = "";
+      if (els.fLandHeavy) els.fLandHeavy.checked = false;
+      if (els.fSearch) {
+        els.fSearch.value = ""; searchQuery = "";
+        if (els.fSearchClear) els.fSearchClear.hidden = true;
+      }
+      map.setView(CENTER, ZOOM);
+      clearBrownfieldOverlay();
+      loadParcels();
+    });
+    // Golf KPI shortcut.
+    els.kpiGolf?.addEventListener("click", () => {
+      els.fPathway.value = "pathway_2_golf_not_ringed";
+      loadParcels();
+    });
   }
 
-  function showLoading(on) {
-    els.loading.classList.toggle("hidden", !on);
+  function initLegend() {
+    const legendControl = L.control({ position: "bottomright" });
+    legendControl.onAdd = () => {
+      const div = L.DomUtil.create("div", "map-legend");
+      const rows = Object.entries(PATHWAY_STYLE).map(
+        ([key, style]) => `
+          <li data-pathway="${key}">
+            <span class="swatch${style.star ? " star" : ""}" style="background:${style.color}"></span>
+            <span>${esc(style.short || style.label)}</span>
+          </li>`,
+      ).join("");
+      div.innerHTML = `
+        <div class="map-legend-head">
+          <span>Pathway legend</span>
+          <span class="map-legend-caret">▾</span>
+        </div>
+        <ul class="map-legend-list">${rows}</ul>
+      `;
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.disableScrollPropagation(div);
+      div.querySelector(".map-legend-head").addEventListener("click", () => {
+        div.classList.toggle("collapsed");
+      });
+      div.querySelectorAll(".map-legend-list li").forEach((li) => {
+        li.addEventListener("click", (e) => {
+          e.stopPropagation();
+          els.fPathway.value = li.dataset.pathway;
+          loadParcels();
+        });
+      });
+      return div;
+    };
+    legendControl.addTo(map);
   }
-  function showToast(msg) {
-    els.toast.textContent = msg;
-    els.toast.classList.remove("hidden");
+
+  function initWelcomeBanner() {
+    if (!els.welcomeBanner) return;
+    let dismissed = false;
+    try { dismissed = localStorage.getItem(WELCOME_STORAGE_KEY) === "1"; } catch {}
+    els.welcomeBanner.hidden = dismissed;
+    els.welcomeDismiss?.addEventListener("click", () => {
+      els.welcomeBanner.hidden = true;
+      try { localStorage.setItem(WELCOME_STORAGE_KEY, "1"); } catch {}
+    });
   }
-  function hideToast() {
-    els.toast.classList.add("hidden");
+
+  function initSearch() {
+    const onInput = debounce(() => {
+      searchQuery = els.fSearch.value || "";
+      els.fSearchClear.hidden = !searchQuery;
+      rerender();
+    }, 200);
+    els.fSearch.addEventListener("input", onInput);
+    els.fSearch.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { els.fSearch.value = ""; onInput(); }
+    });
+    els.fSearchClear.addEventListener("click", () => {
+      els.fSearch.value = ""; searchQuery = "";
+      els.fSearchClear.hidden = true; rerender(); els.fSearch.focus();
+    });
+  }
+
+  function initWatchlist() {
+    updateWatchlistCount();
+    els.wlToggle?.addEventListener("click", () => {
+      watchlistFilterOn = !watchlistFilterOn;
+      els.wlToggle.setAttribute("aria-pressed", String(watchlistFilterOn));
+      els.wlToggle.querySelector(".wl-icon").textContent = watchlistFilterOn ? "★" : "☆";
+      rerender();
+    });
+    els.wlExport?.addEventListener("click", exportWatchlistCsv);
+  }
+
+  function initDrawer() {
+    els.drawerClose?.addEventListener("click", closeDrawer);
+    // ESC closes.
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && currentDrawerParcel) {
+        closeDrawer();
+      }
+    });
   }
 
   // ------------------------------------------------------------------
-  // View toggle (Map / Intel)
+  // View toggle (Map / List / How / Guide)
   // ------------------------------------------------------------------
 
-  // View-tab state is factored out so other places (welcome banner link,
-  // "Learn how this works" button in the sidebar) can jump to a specific view.
   const VIEW_KEYS = ["map", "list", "how", "guide"];
 
   function switchToView(target) {
@@ -1241,29 +1038,17 @@
       el.classList.toggle("active", active);
       el.hidden = !active;
     }
-    // Leaflet needs to recompute its container size when the map pane
-    // comes back from display:none.
+    document.body.dataset.view = target;
     if (target === "map") map.invalidateSize();
-  }
-
-  function expandAllIntelSections(scope) {
-    // scope is a #view-* element; only expand sections inside it.
-    const root = scope || document;
-    root.querySelectorAll(".intel-section").forEach((s) => { s.open = true; });
+    // Close the drawer when the user switches away from map/list — a
+    // parcel detail isn't meaningful under How It Works.
+    if (target !== "map" && target !== "list") closeDrawer();
   }
 
   function initViewTabs() {
     document.querySelectorAll(".view-btn").forEach((btn) => {
       btn.addEventListener("click", () => switchToView(btn.dataset.view));
     });
-    // The "Learn how this works" chip is an onboarding path for a first-
-    // timer — take them to the Scanner Guide with every section expanded
-    // so the walkthrough is visible in one scroll.
-    els.learnLink?.addEventListener("click", () => {
-      switchToView("guide");
-      expandAllIntelSections(document.getElementById("view-guide"));
-    });
-    // Hero-jump links inside How/Guide (each references the other tab).
     document.querySelectorAll(".hero-jump").forEach((a) => {
       a.addEventListener("click", (e) => {
         e.preventDefault();
@@ -1272,10 +1057,42 @@
     });
   }
 
+  function initApiBadge() {
+    if (!els.apiBadge) return;
+    try {
+      const u = new URL(API_BASE);
+      els.apiBadge.textContent = `API: ${u.host}`;
+      els.apiBadge.title = API_BASE;
+    } catch { els.apiBadge.textContent = `API: ${API_BASE}`; }
+  }
+
+  // ------------------------------------------------------------------
+  // Topbar-height CSS var — used by the drawer so it sits below the header
+  // ------------------------------------------------------------------
+
+  function updateTopbarHeight() {
+    const h = document.querySelector(".topbar")?.offsetHeight || 0;
+    document.documentElement.style.setProperty("--topbar-h", h + "px");
+  }
+  window.addEventListener("resize", debounce(updateTopbarHeight, 100));
+
+  // ------------------------------------------------------------------
+  // Toast + loading helpers
+  // ------------------------------------------------------------------
+
+  function showLoading(on) { els.loading.classList.toggle("hidden", !on); }
+  function showToast(msg) {
+    els.toast.textContent = msg;
+    els.toast.classList.remove("hidden");
+    setTimeout(() => els.toast.classList.add("hidden"), 4500);
+  }
+  function hideToast() { els.toast.classList.add("hidden"); }
+
   // ------------------------------------------------------------------
   // Boot
   // ------------------------------------------------------------------
 
+  document.body.dataset.view = "map";
   initFilters();
   initLegend();
   initApiBadge();
@@ -1283,5 +1100,8 @@
   initWelcomeBanner();
   initSearch();
   initCopyDelegation();
+  initWatchlist();
+  initDrawer();
+  updateTopbarHeight();
   loadParcels();
 })();
