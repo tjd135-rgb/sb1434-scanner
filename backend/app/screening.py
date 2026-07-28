@@ -88,14 +88,29 @@ def ensure_indexes() -> None:
 
 _INSERT_QUALIFIERS_SQL = """
     INSERT INTO qualifying_parcels (
-        parcel_id, county_fips, acres, env_trigger, brownfield_area_id,
-        brownfield_area_name, ag_exclusion, park_exclusion, utility_flag,
-        dor_uc, own_name, pathway_hint, latitude, longitude, geom
+        parcel_id, county_fips, acres, jv, lnd_val, land_to_improvement_ratio,
+        env_trigger, brownfield_area_id, brownfield_area_name,
+        ag_exclusion, park_exclusion, utility_flag,
+        dor_uc, own_name, phy_addr1, phy_city, phy_zipcd,
+        pathway_hint, latitude, longitude, geom
     )
     SELECT
         p.parcel_id,
         p.county_fips,
         p.lnd_sqfoot / 43560.0 AS acres,
+
+        -- Value context copied from parcels so filters + display don't
+        -- need a JOIN back to parcels every request.
+        p.jv,
+        p.lnd_val,
+        CASE
+            WHEN p.jv IS NULL OR p.lnd_val IS NULL THEN NULL
+            WHEN p.jv - p.lnd_val > 0 THEN (p.lnd_val / (p.jv - p.lnd_val))::float
+            -- Vacant / near-vacant: no measurable improvement value.
+            -- Use a sentinel of 999 so land-heavy filters still catch it.
+            WHEN p.lnd_val > 0 THEN 999.0
+            ELSE NULL
+        END AS land_to_improvement_ratio,
 
         -- Gate 3 trigger classification. A parcel is here because ba OR cs
         -- matched; label which.
@@ -107,31 +122,20 @@ _INSERT_QUALIFIERS_SQL = """
         ba.area_id   AS brownfield_area_id,
         ba.area_name AS brownfield_area_name,
 
-        -- Exclusion flags. Ag / park exclusions filter in the WHERE, so these
-        -- come out FALSE for rows that pass. Utility flag is informational.
-        (p.dor_uc BETWEEN '050' AND '069') AS ag_exclusion,
-        (p.dor_uc = '082' AND (
-            p.own_name ILIKE '%CITY OF%' OR p.own_name ILIKE '%COUNTY OF%'
-            OR p.own_name ILIKE '%TOWN OF%' OR p.own_name ILIKE '%VILLAGE OF%'
-            OR p.own_name ILIKE '%MIAMI-DADE%' OR p.own_name ILIKE '%BROWARD%'
-            OR p.own_name ILIKE '%PALM BEACH%'
-        )) AS park_exclusion,
-        (
-            p.dor_uc BETWEEN '091' AND '097'
-            OR p.own_name ILIKE '%FPL%'
-            OR p.own_name ILIKE '%FLORIDA POWER%'
-            OR p.own_name ILIKE '%NEXTERA%'
-            OR p.own_name ILIKE '%DUKE ENERGY%'
-            OR p.own_name ILIKE '%TECO%'
-            OR p.own_name ILIKE '%PEOPLES GAS%'
-            OR p.own_name ILIKE '%FLORIDA CITY GAS%'
-        ) AS utility_flag,
+        -- Exclusion flags on the surviving row (all FALSE by definition
+        -- since the WHERE filtered them out); kept for schema parity.
+        FALSE AS ag_exclusion,
+        FALSE AS park_exclusion,
+        FALSE AS utility_flag,
 
         p.dor_uc,
         LEFT(p.own_name, 100) AS own_name,
+        p.phy_addr1,
+        p.phy_city,
+        p.phy_zipcd,
 
         -- Pathway hint. Sourced from pathways.PATHWAY_CASE_SQL so the
-        -- 13-pathway mapping lives in ONE place; golf parcels emit
+        -- pathway mapping lives in ONE place; golf parcels emit
         -- 'pathway_golf_pending' here and the ring test refines them
         -- into pathway_1 / _1b / _2 later.
         __PATHWAY_CASE__ AS pathway_hint,
@@ -166,7 +170,9 @@ _INSERT_QUALIFIERS_SQL = """
         AND p.geom IS NOT NULL
         -- Gate 3: at least one environmental trigger present.
         AND (ba.area_id IS NOT NULL OR cs.site_id IS NOT NULL)
+        -- Gate 5A: exclude agricultural (DOR 050-069).
         AND NOT (p.dor_uc BETWEEN '050' AND '069')
+        -- Gate 5B: exclude government-owned public parks.
         AND NOT (
             p.dor_uc = '082' AND (
                 p.own_name ILIKE '%CITY OF%' OR p.own_name ILIKE '%COUNTY OF%'
@@ -185,9 +191,54 @@ _INSERT_QUALIFIERS_SQL = """
                      :military_meters
                    )
         )
+        -- Gate 5E: exclude institutional uses (DOR 070-079). Covers
+        -- private schools, homes for the aged, orphanages, mortuaries,
+        -- clubs, sanitariums, cultural orgs. Not actionable as
+        -- redevelopment targets at scale.
+        AND NOT (p.dor_uc BETWEEN '070' AND '079')
+        -- Gate 5F: exclude the additional school DOR codes not already
+        -- caught by 070-079: 072 private schools + 084 colleges.
+        AND p.dor_uc NOT IN ('084')
+        -- Gate 5G: exclude utility parcels (DOR 091-097). Removed
+        -- from pathways because the 15-year title lookback required
+        -- to confirm qualification isn't actionable without manual
+        -- title research.
+        AND NOT (p.dor_uc BETWEEN '091' AND '097')
+        -- Gate 5H: exclude explicit military/airport owner patterns
+        -- (catches "DADE COUNTY HOMESTEAD AIR BASE" and similar false
+        -- positives that snuck through the geometric ¼-mile buffer).
+        AND NOT (
+            p.own_name ILIKE '%AIR BASE%'
+            OR p.own_name ILIKE '%AIR FORCE%'
+            OR p.own_name ILIKE '%MILITARY%'
+            OR p.own_name ILIKE '% NAVY%'
+            OR p.own_name ILIKE '% ARMY%'
+            OR p.own_name ILIKE '%NATIONAL GUARD%'
+            OR p.own_name ILIKE '%COAST GUARD%'
+            OR p.own_name ILIKE '%HOMESTEAD AIR%'
+        )
+        -- Gate 5I: exclude broad government ownership UNLESS the DOR
+        -- code shows a commercial or industrial use (010-049) — govts
+        -- sometimes own leasable commercial land that stays actionable.
+        AND NOT (
+            NOT (p.dor_uc BETWEEN '010' AND '049')
+            AND (
+                p.own_name ILIKE '%COUNTY OF%'
+                OR p.own_name ILIKE '%CITY OF%'
+                OR p.own_name ILIKE '%STATE OF FLORIDA%'
+                OR p.own_name ILIKE '%UNITED STATES%'
+                OR p.own_name ILIKE '%SCHOOL BOARD%'
+                OR p.own_name ILIKE '%SCHOOL DISTRICT%'
+                OR p.own_name ILIKE '%WATER MANAGEMENT%'
+                OR p.own_name ILIKE '%SOUTH FLORIDA WATER%'
+            )
+        )
     ON CONFLICT (parcel_id) DO UPDATE SET
         county_fips = EXCLUDED.county_fips,
         acres = EXCLUDED.acres,
+        jv = EXCLUDED.jv,
+        lnd_val = EXCLUDED.lnd_val,
+        land_to_improvement_ratio = EXCLUDED.land_to_improvement_ratio,
         env_trigger = EXCLUDED.env_trigger,
         brownfield_area_id = EXCLUDED.brownfield_area_id,
         brownfield_area_name = EXCLUDED.brownfield_area_name,
@@ -196,6 +247,9 @@ _INSERT_QUALIFIERS_SQL = """
         utility_flag = EXCLUDED.utility_flag,
         dor_uc = EXCLUDED.dor_uc,
         own_name = EXCLUDED.own_name,
+        phy_addr1 = EXCLUDED.phy_addr1,
+        phy_city = EXCLUDED.phy_city,
+        phy_zipcd = EXCLUDED.phy_zipcd,
         pathway_hint = EXCLUDED.pathway_hint,
         latitude = EXCLUDED.latitude,
         longitude = EXCLUDED.longitude,
@@ -350,9 +404,17 @@ def run_screen(update_adjacency: bool = True) -> Dict[str, Any]:
                 "Run ingest-udb to populate."
             )
 
+        # Full-replace pattern: TRUNCATE first so rows that no longer
+        # pass the new exclusion gates don't linger. The INSERT below is
+        # authoritative — every re-screen is a fresh classification.
+        log.info("Truncating qualifying_parcels for fresh full re-screen")
+        conn.execute(text("TRUNCATE qualifying_parcels"))
+
         log.info(
-            "Applying Gates 1, 2, 3 (brownfield OR cleanup within %.1fm), 5A, 5B, "
-            "5D (military exclusion at %.1fm) (INSERT ... SELECT)",
+            "Applying Gates 1, 2, 3 (brownfield OR cleanup within %.1fm), 5A/5B/5D "
+            "(military at %.1fm), 5E/5F (institutions), 5G (utilities), "
+            "5H (military-owner names), 5I (broad-gov-not-commercial) "
+            "(INSERT ... SELECT)",
             CLEANUP_PROXIMITY_METERS,
             MILITARY_EXCLUSION_METERS,
         )

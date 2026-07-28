@@ -27,9 +27,12 @@ PATHWAY_VALUES: frozenset[str] = frozenset(
         "pathway_3_industrial",
         "pathway_4_commercial",
         "pathway_5_office",
-        "pathway_6_institutional",
+        # pathway_6_institutional REMOVED — institutional parcels (DOR
+        # 070-079) are now excluded upstream in screening.py.
         "pathway_7_residential_redev",
-        "pathway_8_utility",
+        # pathway_8_utility REMOVED — utility parcels (DOR 091-097 or
+        # utility-owner names) are excluded upstream because the required
+        # 15-year title lookback isn't actionable without manual research.
         "pathway_9_auto_fuel",
         "pathway_10_hospitality",
         "pathway_11_vacant_commercial",
@@ -53,9 +56,6 @@ RING_TEST_PARTIAL_THRESHOLD_PCT: float = 40.0
 # SQL explain the priority ordering.
 PATHWAY_CASE_SQL: str = """
 CASE
-    -- Utility DOR codes override everything; owner-name utility_flag is
-    -- surfaced separately for analyst review.
-    WHEN p.dor_uc BETWEEN '091' AND '097' THEN 'pathway_8_utility'
     -- Auto/fuel is more specific than commercial (028) and industrial (048).
     WHEN p.dor_uc IN ('028', '048')       THEN 'pathway_9_auto_fuel'
     -- Golf gets a placeholder until the ring test refines it.
@@ -67,8 +67,10 @@ CASE
     WHEN p.dor_uc BETWEEN '017' AND '019' THEN 'pathway_5_office'
     WHEN p.dor_uc BETWEEN '041' AND '049' THEN 'pathway_3_industrial'
     WHEN p.dor_uc BETWEEN '011' AND '029' THEN 'pathway_4_commercial'
-    WHEN p.dor_uc BETWEEN '070' AND '079' THEN 'pathway_6_institutional'
     WHEN p.dor_uc BETWEEN '001' AND '009' THEN 'pathway_7_residential_redev'
+    -- pathway_6_institutional (070-079) and pathway_8_utility (091-097)
+    -- entries removed — those DOR ranges are excluded upstream in
+    -- screening.py's WHERE clause so they never reach this CASE.
     ELSE 'pathway_13_other'
 END
 """

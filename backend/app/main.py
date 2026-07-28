@@ -147,9 +147,11 @@ def get_brownfield_area(area_id: str, db: Session = Depends(get_db)) -> Dict[str
 # ---------- qualifying parcels ----------
 
 _QP_COLS = (
-    "parcel_id, county_fips, acres, env_trigger, brownfield_area_id, "
-    "brownfield_area_name, adjacent_residential, ag_exclusion, park_exclusion, "
-    "utility_flag, udb_status, dor_uc, own_name, pathway_hint, "
+    "parcel_id, county_fips, acres, jv, lnd_val, land_to_improvement_ratio, "
+    "env_trigger, brownfield_area_id, brownfield_area_name, "
+    "adjacent_residential, ag_exclusion, park_exclusion, "
+    "utility_flag, udb_status, dor_uc, own_name, "
+    "phy_addr1, phy_city, phy_zipcd, pathway_hint, "
     "ring_test_pct, ring_test_result, latitude, longitude"
 )
 # ring_test_samples is JSONB and can be large — surface it only on the
@@ -175,6 +177,12 @@ def list_qualifying_parcels(
     ),
     ring_test_result: Optional[str] = Query(
         None, description="'ringed', 'partially_ringed', or 'not_ringed' (golf parcels)"
+    ),
+    min_jv: Optional[float] = Query(None, ge=0, description="Minimum just value ($)"),
+    max_jv: Optional[float] = Query(None, ge=0, description="Maximum just value ($)"),
+    min_land_ratio: Optional[float] = Query(
+        None, ge=0,
+        description="Minimum land_to_improvement_ratio (1.0 = land worth more than improvements)",
     ),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
@@ -213,17 +221,22 @@ def list_qualifying_parcels(
     if ring_test_result is not None:
         where.append("qp.ring_test_result = :rtr")
         params["rtr"] = ring_test_result
+    if min_jv is not None:
+        where.append("qp.jv >= :mjv")
+        params["mjv"] = min_jv
+    if max_jv is not None:
+        where.append("qp.jv <= :xjv")
+        params["xjv"] = max_jv
+    if min_land_ratio is not None:
+        where.append("qp.land_to_improvement_ratio >= :mlr")
+        params["mlr"] = min_land_ratio
 
-    # JOIN parcels for phy_addr1/city/zip so the frontend list view can
-    # Google-search a real address. Cheap: qualifying_parcels is ~4k rows
-    # and the join is on the parcels PK.
+    # phy_addr1/phy_city/phy_zipcd now live on qualifying_parcels itself
+    # (copied during screening), so no JOIN back to parcels is needed.
     qp_cols = ", ".join(f"qp.{c.strip()}" for c in _QP_COLS.split(","))
     sql = (
-        f"SELECT {qp_cols}, "
-        "       p.phy_addr1, p.phy_city, p.phy_zipcd "
+        f"SELECT {qp_cols} "
         "  FROM qualifying_parcels qp "
-        "  LEFT JOIN parcels p ON p.county_fips = qp.county_fips "
-        "                     AND p.parcel_id = qp.parcel_id "
         f" WHERE {' AND '.join(where)} "
         " ORDER BY qp.acres DESC NULLS LAST "
         " LIMIT :lim OFFSET :off"

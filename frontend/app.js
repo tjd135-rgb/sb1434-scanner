@@ -63,20 +63,13 @@
       one_liner: "Underperforming office on qualifying land — teardown-to-rental play.",
       angle: "Post-COVID vacancy + SB 1434 unlock = teardown-to-rental play. Verify current occupancy and lease tails.",
     },
-    pathway_6_institutional: {
-      color: "#7b3f9f", label: "6 · Institutional", short: "Institutional",
-      one_liner: "Institutional site (school, church, hospital) — patient-capital acquisition.",
-      angle: "Long-tenured owners (churches, schools, hospitals). Patient-capital deals — sellers often need seller-financing or long closes.",
-    },
+    // pathway_6_institutional and pathway_8_utility REMOVED — those DOR
+    // ranges are now excluded upstream in screening.py so they never
+    // reach the frontend.
     pathway_7_residential_redev: {
       color: "#3ea55c", label: "7 · Residential redev", short: "Residential redev",
       one_liner: "Existing residential 5+ acres — mobile-home park or garden apartment densification.",
       angle: "Mobile-home parks and aging garden apartments. Existing entitlement plus SB 1434 unlock supports densification — mind tenant displacement rules.",
-    },
-    pathway_8_utility: {
-      color: "#8b5a2b", label: "8 · Utility", short: "Utility",
-      one_liner: "Utility-owned parcel — requires 15-year title lookback before proceeding.",
-      angle: "⚠ 15-YEAR TITLE LOOKBACK required before you can rely on qualification. Any prior utility ownership disqualifies under §163.2525(4)(e).",
     },
     pathway_9_auto_fuel: {
       color: "#c15a12", label: "9 · Auto/fuel", short: "Auto/fuel",
@@ -128,6 +121,42 @@
     },
   };
 
+  // Florida DOR use codes → human-readable property type. Reference:
+  // https://floridarevenue.com/property/Documents/DORCodes.pdf
+  const DOR_USE_CODES = {
+    "001": "Single Family",       "002": "Mobile Home",
+    "003": "Multi-Family (10+)",  "004": "Condominium",
+    "005": "Cooperative",         "006": "Retirement Home",
+    "007": "Misc Residential",    "008": "Multi-Family (<10)",
+    "009": "Non-Market Residential",
+    "010": "Vacant Commercial",   "011": "Store",
+    "012": "Mixed Use Store/Office","013": "Department Store",
+    "014": "Supermarket",         "015": "Regional Mall",
+    "016": "Community Shopping Center",
+    "017": "Professional Office", "018": "Medical Office",
+    "019": "Financial Office",    "020": "Airport / Bus Terminal",
+    "021": "Restaurant",          "022": "Drive-in Restaurant",
+    "023": "Nightclub",           "024": "Bowling Alley",
+    "025": "Tourist Attraction",  "026": "Service Station",
+    "027": "Auto Sales / Repair", "028": "Parking Lot (Commercial)",
+    "029": "Wholesale Outlet",    "030": "Florist / Greenhouse",
+    "031": "Drive-in Theater",    "032": "Theater",
+    "033": "Auditorium",          "034": "Amusement Park",
+    "035": "Fairground",          "036": "Camp",
+    "037": "Racetrack",           "038": "Golf Course",
+    "039": "Hotel / Motel",       "040": "Vacant Industrial",
+    "041": "Light Manufacturing", "042": "Heavy Manufacturing",
+    "043": "Lumber Yard",         "044": "Packing Plant",
+    "045": "Cannery",             "046": "Other Food Processing",
+    "047": "Mineral Processing",  "048": "Warehouse",
+    "049": "Open Storage",
+  };
+
+  function propertyType(dor_uc) {
+    if (!dor_uc) return "Unknown use";
+    return DOR_USE_CODES[dor_uc] || `DOR ${dor_uc}`;
+  }
+
   const COUNTY_NAMES = { "23": "Miami-Dade", "16": "Broward", "60": "Palm Beach" };
 
   // ------------------------------------------------------------------
@@ -150,7 +179,13 @@
     fRing: $("f-ring"),
     fUdb: $("f-udb"),
     fMinAcres: $("f-min-acres"),
+    fMinJv: $("f-min-jv"),
+    fMaxJv: $("f-max-jv"),
+    fLandHeavy: $("f-land-heavy"),
+    fSatellite: $("f-satellite"),
+    fHeatmap: $("f-heatmap"),
     fReset: $("f-reset"),
+    fExportCsv: $("f-export-csv"),
     fSearch: $("f-search"),
     fSearchClear: $("f-search-clear"),
     listContainer: $("list-container"),
@@ -173,15 +208,31 @@
   // Map
   // ------------------------------------------------------------------
 
-  const map = L.map("map", { preferCanvas: true }).setView(CENTER, ZOOM);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  const map = L.map("map", { preferCanvas: true, zoomControl: true }).setView(CENTER, ZOOM);
+
+  // Two named basemap layers so a sidebar checkbox can toggle between
+  // streets (default) and Esri World Imagery satellite. Only ONE is on
+  // the map at a time.
+  const baseStreets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(map);
+  });
+  const baseSatellite = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    {
+      maxZoom: 19,
+      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+    },
+  );
+  baseStreets.addTo(map);
 
   // All parcel markers live in a single layer group so we can clear+re-add
   // on every filter change without touching the tile layer.
   let markerGroup = L.layerGroup().addTo(map);
+
+  // Overlays that come and go as the user interacts.
+  let brownfieldOverlay = null;   // GeoJSON polygon of the currently-open parcel's brownfield area
+  let heatLayer = null;           // leaflet.heat layer (lazy — only if the user toggles it on)
 
   // ------------------------------------------------------------------
   // Marker rendering
@@ -221,25 +272,31 @@
       maxWidth: 340,
       className: "sb1434-popup",
     });
-
+    attachBrownfieldOverlayHandlers(marker, parcel);
     return marker;
   }
 
   function renderPopup(p) {
-    const county = COUNTY_NAMES[p.county_fips] || p.county_fips || "—";
     const style = styleForPathway(p.pathway_hint);
     const addr = addressString(p);
     const parts = [];
 
     parts.push('<div class="popup">');
 
-    // Header: owner name (fallback), then acres/county line, then a
-    // prominent parcel-id chip with Copy button — the ID is what a user
-    // needs to paste into the county property-appraiser search.
+    // Two-line header: actual property type on top, SB 1434 pathway below.
+    // Property type is what's there today; pathway is the redev bucket.
     parts.push(
-      `<h3>${esc(p.own_name || "(no owner listed)")}</h3>`,
-      `<p class="owner">${fmtNum(p.acres, 2)} acres · ${esc(county)}${p.dor_uc ? ` · DOR ${esc(p.dor_uc)}` : ""}</p>`,
+      `<h3>${esc(propertyType(p.dor_uc))}</h3>`,
+      `<p class="pathway-line" style="color:${style.color}">SB 1434 Pathway: ${esc(style.label)}</p>`,
     );
+
+    // Owner + one-line meta
+    const county = COUNTY_NAMES[p.county_fips] || p.county_fips || "—";
+    parts.push(
+      `<p class="owner">${esc(p.own_name || "(no owner listed)")} · ${fmtNum(p.acres, 1)} acres · ${esc(county)}</p>`,
+    );
+
+    // Parcel ID chip + Copy — analysts paste this into the PA site.
     parts.push(
       '<div class="parcel-row">',
       `<code class="parcel-id">${esc(p.parcel_id || "—")}</code>`,
@@ -252,24 +309,17 @@
       parts.push(`<p class="owner" style="margin-top:-4px">${esc(addr)}</p>`);
     }
 
-    // Pathway pill
-    parts.push('<div class="badges">');
-    parts.push(`<span class="badge" style="background:${style.color}22;border-color:${style.color}">${esc(style.label)}</span>`);
-    parts.push("</div>");
+    // Value context (JV / land / land-improvement ratio)
+    parts.push(renderValueContext(p));
+
+    // Gate checklist — the primary "why does this qualify" answer.
+    parts.push(renderGateChecklist(p));
 
     // Redevelopment angle — one-liner
     if (style.one_liner) {
       parts.push('<span class="section-h">Redevelopment angle</span>');
       parts.push(`<div class="angle">${esc(style.one_liner)}</div>`);
     }
-
-    // Why it qualifies
-    parts.push('<div class="why">');
-    parts.push('<span class="section-h">Why it qualifies</span><ul>');
-    for (const r of qualifyingReasons(p)) {
-      parts.push(`<li class="r-${r.kind}">${esc(r.text)}</li>`);
-    }
-    parts.push("</ul></div>");
 
     // Next steps
     const steps = nextStepsFor(p);
@@ -280,18 +330,66 @@
       parts.push("</ul></div>");
     }
 
-    // Action links
+    // Action links — Google search + Aerial + Street View + PA
     const actions = [];
     actions.push(
       `<a class="primary" href="${googleSearchUrl(p)}" target="_blank" rel="noopener">Search Google</a>`,
     );
     const aer = aerialUrl(p);
-    if (aer) actions.push(`<a href="${aer}" target="_blank" rel="noopener">Aerial view</a>`);
+    if (aer) actions.push(`<a href="${aer}" target="_blank" rel="noopener">🛰️ Aerial</a>`);
+    const sv = streetViewUrl(p);
+    if (sv) actions.push(`<a href="${sv}" target="_blank" rel="noopener">🚗 Street View</a>`);
     const pa = paLink(p);
     if (pa) actions.push(`<a href="${pa.url}" target="_blank" rel="noopener" title="${esc(pa.label)}">County Appraiser</a>`);
     parts.push(`<div class="actions">${actions.join("")}</div>`);
 
     parts.push("</div>");
+    return parts.join("");
+  }
+
+  // Currency formatter for JV / land value.
+  function fmtCurrency(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    return "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+
+  function renderValueContext(p) {
+    if (p.jv == null && p.lnd_val == null) return "";
+    const parts = ['<div class="value-ctx"><span class="section-h">Value</span><dl>'];
+    if (p.jv != null) parts.push(`<dt>Just value</dt><dd>${fmtCurrency(p.jv)}</dd>`);
+    if (p.lnd_val != null) parts.push(`<dt>Land value</dt><dd>${fmtCurrency(p.lnd_val)}</dd>`);
+    if (p.land_to_improvement_ratio != null) {
+      const r = Number(p.land_to_improvement_ratio);
+      const label = r >= 999 ? "Vacant / near-vacant"
+        : r >= 1 ? `${r.toFixed(2)}× (land-heavy)`
+        : r.toFixed(2) + "×";
+      parts.push(`<dt>Land/improvement</dt><dd>${esc(label)}</dd>`);
+    }
+    parts.push("</dl></div>");
+    return parts.join("");
+  }
+
+  function renderGateChecklist(p) {
+    const gates = gateChecklist(p);
+    const parts = ['<div class="gates"><span class="section-h">Statutory gate checklist</span><ul>'];
+    for (const g of gates) {
+      parts.push(
+        `<li><span class="g-icon">${g.icon}</span>`,
+        `<span class="g-body"><strong>${esc(g.label)}</strong>`,
+        g.detail ? `<span class="g-detail"> — ${esc(g.detail)}</span>` : "",
+        "</span>",
+      );
+      if (g.sub && g.sub.length) {
+        parts.push('<ul class="sub">');
+        for (const s of g.sub) {
+          parts.push(`<li><span class="g-icon">${s.icon}</span> ${esc(s.text)}</li>`);
+        }
+        parts.push("</ul>");
+      }
+      parts.push("</li>");
+    }
+    parts.push("</ul></div>");
     return parts.join("");
   }
 
@@ -326,6 +424,11 @@
     for (const [k, v] of Object.entries(map)) if (v) q.set(k, v);
     const minAcres = els.fMinAcres.value.trim();
     if (minAcres !== "") q.set("min_acres", minAcres);
+    const minJv = els.fMinJv?.value.trim();
+    if (minJv) q.set("min_jv", minJv);
+    const maxJv = els.fMaxJv?.value.trim();
+    if (maxJv) q.set("max_jv", maxJv);
+    if (els.fLandHeavy?.checked) q.set("min_land_ratio", "1.0");
     return q;
   }
 
@@ -392,6 +495,9 @@
     els.kpiAdjacent.textContent = fmtNum(adjacentCount);
     if (els.kpiGolf) els.kpiGolf.textContent = fmtNum(golfCount);
     renderList(rows);
+    // Recompute heat layer if it's on — new filter/search set = new
+    // intensity distribution.
+    if (els.fHeatmap?.checked) rebuildHeatmap();
 
     // Search-affordance: if exactly one row matches, zoom to it and pop.
     if (searchQuery.trim() && rows.length === 1 && rows[0].latitude != null) {
@@ -454,12 +560,104 @@
   }
 
   function aerialUrl(p) {
+    // !1e3 = Google Maps satellite/hybrid. Previous value (!1e1) opened
+    // Street View which shows "No imagery available" on large rural or
+    // industrial parcels — useless for the actual aerial context we want.
     if (p.latitude == null || p.longitude == null) return null;
-    return `https://www.google.com/maps/@${p.latitude},${p.longitude},17z/data=!3m1!1e1`;
+    return `https://www.google.com/maps/@${p.latitude},${p.longitude},17z/data=!3m1!1e3`;
+  }
+
+  function streetViewUrl(p) {
+    if (p.latitude == null || p.longitude == null) return null;
+    // Google's Street View deep-link. Some rural parcels have no
+    // coverage — the destination page will say so.
+    return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${p.latitude},${p.longitude}`;
   }
 
   function paLink(p) {
     return PA_URLS[p.county_fips] || null;
+  }
+
+  // Build the five-gate qualification checklist shown in popups + cards.
+  // Each entry: { icon: '✅' | 'ℹ️' | '⚠️', label, detail?, sub? }.
+  function gateChecklist(p) {
+    const gates = [];
+
+    // Gate 1: 5+ acres
+    const acres = Number(p.acres) || 0;
+    gates.push({
+      icon: acres < 6 ? "⚠️" : "✅",
+      label: "Gate 1 · 5+ acres",
+      detail: `${fmtNum(acres, 1)} acres${acres < 6 ? " (borderline — verify LND_SQFOOT)" : ""}`,
+    });
+
+    // Gate 2: tri-county
+    const county = COUNTY_NAMES[p.county_fips] || p.county_fips || "—";
+    gates.push({
+      icon: "✅",
+      label: "Gate 2 · Tri-county",
+      detail: county,
+    });
+
+    // Gate 3: environmental trigger
+    let g3detail = "";
+    if (p.env_trigger === "brownfield_area") {
+      g3detail = p.brownfield_area_name
+        ? `Inside FDEP brownfield area: ${p.brownfield_area_name}`
+        : "Inside FDEP brownfield area";
+    } else if (p.env_trigger === "cleanup_site") {
+      g3detail = "Within 1,500 ft of a DEP cleanup site";
+    } else if (p.env_trigger === "both") {
+      g3detail = p.brownfield_area_name
+        ? `Both — inside "${p.brownfield_area_name}" AND near a DEP cleanup site`
+        : "Both — inside a brownfield area AND near a DEP cleanup site";
+    } else {
+      g3detail = "Environmental trigger present";
+    }
+    gates.push({
+      icon: "✅",
+      label: "Gate 3 · Environmental trigger",
+      detail: g3detail,
+    });
+
+    // Gate 4: residential adjacency
+    if (p.adjacent_residential) {
+      gates.push({
+        icon: "✅",
+        label: "Gate 4 · Residential adjacency",
+        detail: "Residential parcel within 500 ft",
+      });
+    } else {
+      gates.push({
+        icon: "ℹ️",
+        label: "Gate 4 · Residential adjacency",
+        detail: "Not detected in DOR data — verify via aerial view",
+      });
+    }
+
+    // Gate 5: composite of exclusions (all passed by definition — parcel
+    // is here). Sub-bullets show what was checked.
+    const sub = [
+      { icon: "✅", text: "Not agricultural (DOR 050-069)" },
+      { icon: "✅", text: "Not government-owned public park" },
+      { icon: "✅", text: "Not within ¼ mile of a military installation" },
+      { icon: "✅", text: "Not institutional (DOR 070-079) or utility (091-097)" },
+    ];
+    if (p.udb_status) {
+      sub.push({
+        icon: p.udb_status === "inside" ? "✅" : "ℹ️",
+        text: p.udb_status === "inside"
+          ? "Inside Miami-Dade UDB"
+          : "Outside Miami-Dade UDB — additional entitlement friction",
+      });
+    }
+    gates.push({
+      icon: "✅",
+      label: "Gate 5 · No exclusions apply",
+      sub,
+    });
+
+    return gates;
   }
 
   function qualifyingReasons(p) {
@@ -589,19 +787,19 @@
 
     const parts = [];
 
-    // Header row: pathway pill + acres/county
+    // Two-line header: property type + pathway line + meta
     parts.push('<div class="card-head">');
     parts.push(
-      `<span class="pathway-pill" style="background:${style.color}1a;color:${style.color};border-color:${style.color}66">`,
-      `<span class="pathway-dot${style.star ? " star" : ""}" style="background:${style.color}"></span>`,
-      `${esc(style.label)}`,
-      `</span>`,
+      `<div class="card-title-block">`,
+      `<h3 class="card-title">${esc(propertyType(p.dor_uc))}</h3>`,
+      `<div class="card-pathway" style="color:${style.color}">SB 1434 Pathway: ${esc(style.label)}</div>`,
+      `</div>`,
     );
     parts.push(`<span class="card-meta">${fmtNum(p.acres, 1)} acres · ${esc(county)}</span>`);
     parts.push("</div>");
 
-    // Identity
-    parts.push(`<h3 class="card-title">${esc(p.own_name || "(no owner listed)")}</h3>`);
+    // Owner + address + parcel id
+    parts.push(`<p class="card-owner">${esc(p.own_name || "(no owner listed)")}</p>`);
     const idLine = [
       `<span class="mono">${esc(p.parcel_id || "—")}</span>`,
       p.dor_uc ? `DOR ${esc(p.dor_uc)}` : null,
@@ -609,12 +807,11 @@
     ].filter(Boolean).join(" · ");
     parts.push(`<p class="card-id">${idLine}</p>`);
 
-    // Why it qualifies
-    parts.push('<div class="card-why"><span class="section-h">Why it qualifies</span><ul>');
-    for (const r of qualifyingReasons(p)) {
-      parts.push(`<li class="r-${r.kind}">${esc(r.text)}</li>`);
-    }
-    parts.push("</ul></div>");
+    // Value context (JV / land / land-improvement ratio)
+    parts.push(renderValueContext(p));
+
+    // Gate checklist
+    parts.push(renderGateChecklist(p));
 
     // Redevelopment angle
     if (style.angle) {
@@ -632,7 +829,9 @@
       `<a class="btn primary" href="${googleSearchUrl(p)}" target="_blank" rel="noopener">Search Google</a>`,
     );
     const aer = aerialUrl(p);
-    if (aer) actions.push(`<a class="btn" href="${aer}" target="_blank" rel="noopener">Aerial view</a>`);
+    if (aer) actions.push(`<a class="btn" href="${aer}" target="_blank" rel="noopener">🛰️ Aerial</a>`);
+    const sv = streetViewUrl(p);
+    if (sv) actions.push(`<a class="btn" href="${sv}" target="_blank" rel="noopener">🚗 Street View</a>`);
     const pa = paLink(p);
     if (pa) {
       actions.push(
@@ -646,8 +845,8 @@
 
     card.innerHTML = parts.join("");
 
-    // Whole card is a click-target — outside links + copy button — opens
-    // the Google search in a new tab (matches "click a card → Google").
+    // Whole card is a click-target — outside links + buttons — opens
+    // the Google search in a new tab.
     card.addEventListener("click", (e) => {
       if (e.target.closest("a, button")) return;
       window.open(googleSearchUrl(p), "_blank", "noopener");
@@ -674,6 +873,12 @@
       els[k].addEventListener("change", rerun);
     });
     els.fMinAcres.addEventListener("input", debounce(rerun, 350));
+    els.fMinJv?.addEventListener("input", debounce(rerun, 350));
+    els.fMaxJv?.addEventListener("input", debounce(rerun, 350));
+    els.fLandHeavy?.addEventListener("change", rerun);
+    els.fSatellite?.addEventListener("change", () => setBasemap(els.fSatellite.checked));
+    els.fHeatmap?.addEventListener("change", () => setHeatmap(els.fHeatmap.checked));
+    els.fExportCsv?.addEventListener("click", exportCsv);
     els.fReset.addEventListener("click", () => {
       els.fCounty.value = "";
       els.fPathway.value = "";
@@ -681,6 +886,9 @@
       els.fRing.value = "";
       els.fUdb.value = "";
       els.fMinAcres.value = "";
+      if (els.fMinJv) els.fMinJv.value = "";
+      if (els.fMaxJv) els.fMaxJv.value = "";
+      if (els.fLandHeavy) els.fLandHeavy.checked = false;
       // Clear the search too — reset means reset EVERYTHING.
       if (els.fSearch) {
         els.fSearch.value = "";
@@ -690,6 +898,7 @@
       // Recenter the map to the tri-county default so a user who zoomed
       // in on one result via the search box gets a clean slate.
       map.setView(CENTER, ZOOM);
+      clearBrownfieldOverlay();
       loadParcels();
     });
 
@@ -759,7 +968,7 @@
     });
     els.welcomeIntelLink?.addEventListener("click", (e) => {
       e.preventDefault();
-      switchToView("intel");
+      switchToView("how");
     });
   }
 
@@ -787,6 +996,171 @@
       rerender();
       els.fSearch.focus();
     });
+  }
+
+  // ------------------------------------------------------------------
+  // Basemap toggle (OSM streets ↔ Esri satellite)
+  // ------------------------------------------------------------------
+
+  function setBasemap(satellite) {
+    if (satellite) {
+      if (map.hasLayer(baseStreets)) map.removeLayer(baseStreets);
+      if (!map.hasLayer(baseSatellite)) baseSatellite.addTo(map);
+    } else {
+      if (map.hasLayer(baseSatellite)) map.removeLayer(baseSatellite);
+      if (!map.hasLayer(baseStreets)) baseStreets.addTo(map);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Value heat map (Leaflet.heat plugin, loaded from CDN)
+  // ------------------------------------------------------------------
+
+  function setHeatmap(on) {
+    if (!on) {
+      if (heatLayer) {
+        map.removeLayer(heatLayer);
+        heatLayer = null;
+      }
+      return;
+    }
+    if (typeof L.heatLayer !== "function") {
+      showToast("Heat map plugin not loaded — check console");
+      els.fHeatmap.checked = false;
+      return;
+    }
+    rebuildHeatmap();
+  }
+
+  function rebuildHeatmap() {
+    if (!els.fHeatmap?.checked || typeof L.heatLayer !== "function") return;
+    if (heatLayer) {
+      map.removeLayer(heatLayer);
+      heatLayer = null;
+    }
+    const rows = applySearch(lastRows);
+    // Normalize JV to 0..1 across the visible set so the heat scale
+    // adapts to whatever the current filter surfaces.
+    let maxJv = 0;
+    for (const p of rows) {
+      const v = Number(p.jv) || 0;
+      if (v > maxJv) maxJv = v;
+    }
+    if (maxJv <= 0) return;
+    const points = [];
+    for (const p of rows) {
+      if (p.latitude == null || p.longitude == null) continue;
+      const v = Number(p.jv) || 0;
+      if (v <= 0) continue;
+      points.push([p.latitude, p.longitude, v / maxJv]);
+    }
+    heatLayer = L.heatLayer(points, {
+      radius: 22,
+      blur: 18,
+      minOpacity: 0.35,
+      maxZoom: 15,
+    }).addTo(map);
+  }
+
+  // ------------------------------------------------------------------
+  // Brownfield polygon overlay (fetched on-demand when a parcel opens)
+  // ------------------------------------------------------------------
+
+  function clearBrownfieldOverlay() {
+    if (brownfieldOverlay) {
+      map.removeLayer(brownfieldOverlay);
+      brownfieldOverlay = null;
+    }
+  }
+
+  async function showBrownfieldFor(parcel) {
+    clearBrownfieldOverlay();
+    if (!parcel.brownfield_area_id) return;
+    try {
+      const r = await fetch(
+        `${API_BASE}/brownfield-areas/${encodeURIComponent(parcel.brownfield_area_id)}`,
+      );
+      if (!r.ok) return;
+      const detail = await r.json();
+      const geom = detail.geometry;
+      if (!geom) return;
+      brownfieldOverlay = L.geoJSON(geom, {
+        style: {
+          color: "#f2b731",
+          weight: 2,
+          fillColor: "#f2b731",
+          fillOpacity: 0.15,
+          dashArray: "6 4",
+        },
+        interactive: false,
+      }).addTo(map);
+    } catch (e) {
+      console.warn("Failed to load brownfield geometry:", e);
+    }
+  }
+
+  // Hook into popup open/close on every marker after the layer group
+  // rebuilds — attached inside makeMarker via bindPopup handlers.
+  function attachBrownfieldOverlayHandlers(marker, parcel) {
+    marker.on("popupopen", () => showBrownfieldFor(parcel));
+    marker.on("popupclose", () => clearBrownfieldOverlay());
+  }
+
+  // ------------------------------------------------------------------
+  // CSV export
+  // ------------------------------------------------------------------
+
+  const CSV_COLUMNS = [
+    "parcel_id", "county_fips", "county_name", "own_name",
+    "phy_addr1", "phy_city", "phy_zipcd",
+    "acres", "dor_uc", "property_type",
+    "pathway_hint", "env_trigger", "brownfield_area_name",
+    "ring_test_result", "ring_test_pct",
+    "jv", "lnd_val", "land_to_improvement_ratio",
+    "adjacent_residential", "udb_status", "utility_flag",
+    "latitude", "longitude",
+  ];
+
+  function csvEscape(v) {
+    if (v == null) return "";
+    const s = String(v);
+    if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  }
+
+  function exportCsv() {
+    const rows = applySearch(lastRows);
+    if (rows.length === 0) {
+      showToast("No parcels to export with current filters");
+      return;
+    }
+    const header = CSV_COLUMNS.join(",");
+    const body = rows.map((p) => {
+      const enriched = {
+        ...p,
+        county_name: COUNTY_NAMES[p.county_fips] || "",
+        property_type: propertyType(p.dor_uc),
+      };
+      return CSV_COLUMNS.map((c) => csvEscape(enriched[c])).join(",");
+    }).join("\r\n");
+    const csv = header + "\r\n" + body + "\r\n";
+    // Manually build a YYYYMMDD stamp — Date.now() is unavailable in some
+    // sandboxes and toISOString() is universal.
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    const filename = `sb1434_qualifying_parcels_${y}${m}${d}.csv`;
+
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 500);
   }
 
   // ------------------------------------------------------------------
@@ -852,13 +1226,15 @@
 
   // View-tab state is factored out so other places (welcome banner link,
   // "Learn how this works" button in the sidebar) can jump to a specific view.
+  const VIEW_KEYS = ["map", "list", "how", "guide"];
+
   function switchToView(target) {
     document.querySelectorAll(".view-btn").forEach((b) => {
       const active = b.dataset.view === target;
       b.classList.toggle("active", active);
       b.setAttribute("aria-selected", String(active));
     });
-    for (const key of ["map", "list", "intel"]) {
+    for (const key of VIEW_KEYS) {
       const el = document.getElementById(`view-${key}`);
       if (!el) continue;
       const active = key === target;
@@ -870,8 +1246,10 @@
     if (target === "map") map.invalidateSize();
   }
 
-  function expandAllIntelSections() {
-    document.querySelectorAll(".intel-section").forEach((s) => { s.open = true; });
+  function expandAllIntelSections(scope) {
+    // scope is a #view-* element; only expand sections inside it.
+    const root = scope || document;
+    root.querySelectorAll(".intel-section").forEach((s) => { s.open = true; });
   }
 
   function initViewTabs() {
@@ -879,13 +1257,18 @@
       btn.addEventListener("click", () => switchToView(btn.dataset.view));
     });
     // The "Learn how this works" chip is an onboarding path for a first-
-    // timer — expand every Intel section so the full walkthrough is
-    // visible in one scroll, rather than making them click into each
-    // accordion. Users who reach Intel via the tab button keep the
-    // default behavior (only §1 and §6 open).
+    // timer — take them to the Scanner Guide with every section expanded
+    // so the walkthrough is visible in one scroll.
     els.learnLink?.addEventListener("click", () => {
-      switchToView("intel");
-      expandAllIntelSections();
+      switchToView("guide");
+      expandAllIntelSections(document.getElementById("view-guide"));
+    });
+    // Hero-jump links inside How/Guide (each references the other tab).
+    document.querySelectorAll(".hero-jump").forEach((a) => {
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        switchToView(a.dataset.jump);
+      });
     });
   }
 

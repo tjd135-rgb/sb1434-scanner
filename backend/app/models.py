@@ -221,6 +221,13 @@ class QualifyingParcel(Base):
     parcel_id: Mapped[str] = mapped_column(String(30), primary_key=True)
     county_fips: Mapped[str | None] = mapped_column(String(3))
     acres: Mapped[float | None] = mapped_column(Float)
+    # Phase G: value context copied from parcels at screening time.
+    jv: Mapped[float | None] = mapped_column(Numeric)
+    lnd_val: Mapped[float | None] = mapped_column(Numeric)
+    land_to_improvement_ratio: Mapped[float | None] = mapped_column(Float)
+    phy_addr1: Mapped[str | None] = mapped_column(Text)
+    phy_city: Mapped[str | None] = mapped_column(Text)
+    phy_zipcd: Mapped[str | None] = mapped_column(Text)
     env_trigger: Mapped[str | None] = mapped_column(String(30))
     brownfield_area_id: Mapped[str | None] = mapped_column(String(15))
     brownfield_area_name: Mapped[str | None] = mapped_column(String(120))

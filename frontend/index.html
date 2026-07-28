@@ -75,9 +75,7 @@
           <option value="pathway_3_industrial">3 · Industrial</option>
           <option value="pathway_4_commercial">4 · Commercial</option>
           <option value="pathway_5_office">5 · Office</option>
-          <option value="pathway_6_institutional">6 · Institutional</option>
           <option value="pathway_7_residential_redev">7 · Residential redev</option>
-          <option value="pathway_8_utility">8 · Utility</option>
           <option value="pathway_9_auto_fuel">9 · Auto/fuel</option>
           <option value="pathway_10_hospitality">10 · Hospitality</option>
           <option value="pathway_11_vacant_commercial">11 · Vacant commercial</option>
@@ -117,7 +115,34 @@
         <input id="f-min-acres" type="number" min="0" step="1" placeholder="5" />
       </label>
 
-      <button id="f-reset" class="btn-reset" type="button">Reset filters</button>
+      <div class="filter-row">
+        <label>Min just value ($)
+          <input id="f-min-jv" type="number" min="0" step="10000" placeholder="0" />
+        </label>
+        <label>Max just value ($)
+          <input id="f-max-jv" type="number" min="0" step="10000" placeholder="—" />
+        </label>
+      </div>
+
+      <label class="check">
+        <input id="f-land-heavy" type="checkbox" />
+        <span>Land-heavy only (land ≥ improvements)</span>
+      </label>
+
+      <label class="check">
+        <input id="f-satellite" type="checkbox" />
+        <span>Satellite basemap</span>
+      </label>
+
+      <label class="check">
+        <input id="f-heatmap" type="checkbox" />
+        <span>Value heat map</span>
+      </label>
+
+      <div class="filter-actions">
+        <button id="f-reset" class="btn-reset" type="button">Reset filters</button>
+        <button id="f-export-csv" class="btn-export" type="button">Download CSV</button>
+      </div>
     </section>
 
     <footer class="sidebar-foot">
@@ -129,7 +154,8 @@
     <nav class="view-tabs" role="tablist">
       <button class="view-btn active" data-view="map" role="tab" aria-selected="true">Map</button>
       <button class="view-btn" data-view="list" role="tab" aria-selected="false">List</button>
-      <button class="view-btn" data-view="intel" role="tab" aria-selected="false">Intel</button>
+      <button class="view-btn" data-view="how" role="tab" aria-selected="false">How It Works</button>
+      <button class="view-btn" data-view="guide" role="tab" aria-selected="false">Scanner Guide</button>
     </nav>
 
     <div id="view-list" class="view list-view" hidden>
@@ -169,12 +195,13 @@
       <div id="toast" class="toast hidden"></div>
     </div>
 
-    <div id="view-intel" class="view intel-view" hidden>
+    <div id="view-how" class="view intel-view" hidden>
       <article class="intel">
         <header class="intel-hero">
-          <h1>SB 1434 Scanner · Analyst Intel</h1>
-          <p>Everything you need to interpret what the map is showing, from the statute
-             to the DOR use codes to the golf-course ring test.</p>
+          <h1>How It Works · The Statute</h1>
+          <p>What SB 1434 is, what makes a parcel qualify, and how each pathway
+             is defined. For interpreting the underlying data. If you want a
+             workflow for using the tool itself, see the <a href="#" class="hero-jump" data-jump="guide">Scanner Guide</a>.</p>
         </header>
 
         <details class="intel-section" open>
@@ -428,45 +455,8 @@
           </div>
         </details>
 
-        <details class="intel-section" open>
-          <summary><span class="s-num">6</span> How to use this scanner</summary>
-          <div class="intel-body">
-            <ol class="workflow">
-              <li><strong>Start with the top deals.</strong> Set Pathway to
-                  <em>2 · Golf, not ringed ★</em>. There are currently 6 parcels in this
-                  bucket — begin your review there.</li>
-              <li><strong>Narrow to your market.</strong> Add a County filter. Miami-Dade is
-                  the deepest inventory; Broward and Palm Beach are smaller pools but often
-                  cleaner titles.</li>
-              <li><strong>Click any marker</strong> to open the detail popup. The badges at the
-                  top summarize pathway / env trigger / UDB status / ring test / adjacency /
-                  utility flag at a glance. The Google Maps aerial link opens the exact
-                  parcel in satellite view — always use it before you spend more time on a
-                  deal.</li>
-              <li><strong>For golf courses,</strong> read the ring-test percentage. Anything
-                  between 35% and 45%, or 75% and 85%, is a borderline classification —
-                  don&#39;t treat the pathway label as gospel until you&#39;ve looked at the
-                  actual boundary.</li>
-              <li><strong>For Pathway 8 (utility),</strong> stop and order a 15-year title
-                  history before proceeding. Any prior ownership by an FPL/Duke/TECO-style
-                  utility disqualifies the parcel under §163.2525(4)(e).</li>
-              <li><strong>Use the environmental-trigger filter</strong> to split brownfield-area
-                  parcels (more established cleanup programs, better-defined liability) from
-                  cleanup-site parcels (may need Phase II ESA to confirm contamination
-                  extent).</li>
-              <li><strong>For Miami-Dade,</strong> check <code>udb_status</code>. Parcels
-                  <em>outside</em> the UDB are still qualifying under SB 1434 but face
-                  additional entitlement friction — county comprehensive-plan overrides,
-                  potentially. Not a dealbreaker but a friction point to price in.</li>
-              <li><strong>Export your shortlist.</strong> Use the API directly for CSV:
-                  <code>GET /qualifying-parcels?pathway=…&amp;county=…</code>. Every field
-                  visible in a popup is in the JSON response.</li>
-            </ol>
-          </div>
-        </details>
-
         <details class="intel-section">
-          <summary><span class="s-num">7</span> Field glossary</summary>
+          <summary><span class="s-num">6</span> Field glossary</summary>
           <div class="intel-body">
             <dl class="glossary">
               <dt>Parcel ID</dt>
@@ -525,7 +515,7 @@
         </details>
 
         <details class="intel-section">
-          <summary><span class="s-num">8</span> Data sources &amp; currency</summary>
+          <summary><span class="s-num">7</span> Data sources &amp; currency</summary>
           <div class="intel-body">
             <ul class="sources">
               <li><strong>DOR NAL parcels</strong> — Florida Department of Revenue Name-Address-Legal
@@ -558,11 +548,173 @@
         </details>
       </article>
     </div>
+
+    <div id="view-guide" class="view intel-view" hidden>
+      <article class="intel">
+        <header class="intel-hero">
+          <h1>Scanner Guide · Using This Tool</h1>
+          <p>Step-by-step workflow for finding actionable deals in the scanner.
+             If you want the underlying statute, see <a href="#" class="hero-jump" data-jump="how">How It Works</a>.</p>
+        </header>
+
+        <details class="intel-section" open>
+          <summary><span class="s-num">1</span> Recommended workflow</summary>
+          <div class="intel-body">
+            <ol class="workflow">
+              <li><strong>Start with the top deals.</strong> Click the gold
+                  <em>Golf Opportunities ★</em> KPI tile at the top of the sidebar
+                  — it filters instantly to <em>Pathway 2 · Golf, not ringed</em>,
+                  the highest-value bucket (no SB 1434 overlay).</li>
+              <li><strong>Narrow to your market.</strong> Set County to your target.
+                  Miami-Dade is the deepest inventory; Broward and Palm Beach are
+                  smaller pools but often cleaner titles.</li>
+              <li><strong>Refine by value.</strong> Use <em>Min just value</em> to
+                  cut trivial parcels, or check <em>Land-heavy only</em> to see
+                  parcels where land is worth more than improvements — the classic
+                  redevelopment signal.</li>
+              <li><strong>Click any marker</strong> to open the detail popup. The
+                  gate checklist at the top tells you exactly why the parcel
+                  qualified. The Property Type line shows what's actually there
+                  today; the SB 1434 Pathway line below shows the redevelopment
+                  bucket.</li>
+              <li><strong>For golf courses,</strong> read the ring-test percentage.
+                  Anything between 35-45% or 75-85% is borderline — flip to the
+                  <em>Aerial</em> button and eyeball the actual perimeter before
+                  committing.</li>
+              <li><strong>Toggle the Satellite basemap</strong> when scanning a
+                  cluster — the OSM streets basemap hides parcel context, while
+                  Esri satellite shows what's actually built on the ground.</li>
+              <li><strong>For brownfield parcels,</strong> the FDEP polygon
+                  outline appears on the map automatically when you open the
+                  popup — you can see the full designated area, not just the
+                  parcel centroid.</li>
+              <li><strong>Export your shortlist.</strong> Click <em>Download CSV</em>
+                  in the sidebar to grab every visible parcel with all fields
+                  (owner, address, JV, land ratio, coordinates). Import into your
+                  underwriting spreadsheet or CRM.</li>
+            </ol>
+          </div>
+        </details>
+
+        <details class="intel-section" open>
+          <summary><span class="s-num">2</span> Reading the map</summary>
+          <div class="intel-body">
+            <p><strong>Marker color</strong> = pathway (see legend, bottom-right of
+               the map). <strong>Marker size</strong> = √acres, so a 400-acre
+               course looks 4× the diameter of a 25-acre parcel.
+               <strong>Gold star markers</strong> are <em>Pathway 2 golf-not-ringed</em>
+               — 30% larger with a heavier outline so they pop.</p>
+            <p><strong>The floating legend</strong> is clickable — clicking any
+               pathway entry filters the map to just that pathway.</p>
+            <p><strong>Basemap toggle</strong> (Satellite checkbox in the sidebar):
+               switches between OSM streets and Esri World Imagery satellite.
+               Streets give you addresses and street names; satellite shows
+               parcel context — buildings, greenspace, adjacent uses.</p>
+            <p><strong>Value heat map</strong> (checkbox in the sidebar): overlays
+               a red/yellow intensity gradient weighted by just value. Bright
+               spots are dense clusters of high-value parcels.</p>
+          </div>
+        </details>
+
+        <details class="intel-section">
+          <summary><span class="s-num">3</span> Reading the popup</summary>
+          <div class="intel-body">
+            <p>The parcel popup and list card are the same content, just laid out
+               differently. Both have:</p>
+            <ul>
+              <li><strong>Property type</strong> (top line): the actual current
+                  use per DOR — <em>Warehouse</em>, <em>Golf Course</em>,
+                  <em>Shopping Center</em>, etc.</li>
+              <li><strong>Pathway line</strong> (below, smaller): the SB 1434
+                  redevelopment classification the scanner assigned.</li>
+              <li><strong>Gate checklist</strong>: every one of the five statutory
+                  gates with a ✅ ℹ️ or ⚠️ icon. Green = passed cleanly; blue = a
+                  data-quality note (verify manually); yellow = borderline. All
+                  visible parcels passed all five gates by construction — this
+                  section shows you <em>how</em>.</li>
+              <li><strong>Redevelopment angle</strong>: a one-line thesis for the
+                  pathway — <em>"Classic brownfield-to-mixed-use. Environmental
+                  remediation cost is the primary underwriting question."</em></li>
+              <li><strong>Next steps</strong>: per-parcel actionable follow-ups.
+                  Automatically populated based on the parcel's attributes
+                  (utility → title lookback, borderline ring → survey, missing
+                  adjacency → aerial verify, outside UDB → entitlement note).</li>
+              <li><strong>Action buttons</strong>: Google search, Aerial (Google
+                  Maps satellite), Street View, and the correct
+                  county property appraiser link.</li>
+            </ul>
+          </div>
+        </details>
+
+        <details class="intel-section">
+          <summary><span class="s-num">4</span> Tips by pathway</summary>
+          <div class="intel-body">
+            <h3>Golf courses (Pathways 1, 1B, 2)</h3>
+            <p>Only Pathway 2 (not ringed) is unconstrained. For 1 and 1B, the
+               SB 1434 overlay caps density — you're competing on repositioning
+               (banquet, wellness, event space) rather than pure conversion.</p>
+            <h3>Industrial (Pathway 3) &amp; Auto/fuel (Pathway 9)</h3>
+            <p>Assume contamination. Get a Phase II ESA and a remediation
+               estimate before LOI. Cleanup cost IS the deal, and it varies by
+               1-2 orders of magnitude between clean industrial and gas-station
+               plumes.</p>
+            <h3>Commercial (Pathway 4) &amp; Office (Pathway 5)</h3>
+            <p>Retail apocalypse plus post-COVID office vacancy. Verify tenant
+               tails — a 10-year Wal-Mart NNN lease kills your teardown timing.</p>
+            <h3>Residential redev (Pathway 7)</h3>
+            <p>Mobile-home parks and aging garden apartments. Mind Florida
+               tenant-displacement statutes — mobile-home park closures require
+               6+ months notice and relocation assistance.</p>
+            <h3>Vacant commercial (Pathway 11)</h3>
+            <p>Least-encumbered starting point — no tenants to relocate. But
+               vacant commercial in a brownfield zone often means the last owner
+               abandoned it because remediation was uneconomic. Read the FDEP
+               file before pursuing.</p>
+          </div>
+        </details>
+
+        <details class="intel-section">
+          <summary><span class="s-num">5</span> Filters &amp; search reference</summary>
+          <div class="intel-body">
+            <dl class="glossary">
+              <dt>Search box</dt>
+              <dd>Substring match on parcel ID or owner name (case-insensitive).
+                  When exactly one row matches, the map zooms to it and opens
+                  the popup. <em>Escape</em> clears.</dd>
+              <dt>Min just value</dt>
+              <dd>Just value = DOR-assessed market value including improvements.
+                  Use this to strip out trivial parcels.</dd>
+              <dt>Max just value</dt>
+              <dd>Upper bound on JV. Combined with min-JV, defines a value band.</dd>
+              <dt>Land-heavy only</dt>
+              <dd>Land ≥ improvements (ratio ≥ 1.0). The classic underutilized-parcel
+                  signal — usually means aging or vacant improvements sitting on
+                  valuable dirt.</dd>
+              <dt>Satellite basemap</dt>
+              <dd>Swaps OSM streets for Esri World Imagery satellite tiles.</dd>
+              <dt>Value heat map</dt>
+              <dd>Red/yellow intensity overlay weighted by JV — bright spots are
+                  high-value parcel clusters.</dd>
+              <dt>Reset filters</dt>
+              <dd>Clears every filter, the search box, and re-centers the map to
+                  the tri-county default.</dd>
+              <dt>Download CSV</dt>
+              <dd>Exports every currently-visible parcel to
+                  <code>sb1434_qualifying_parcels_YYYYMMDD.csv</code> with all
+                  fields (owner, address, JV, land ratio, coordinates, pathway,
+                  ring-test result, adjacency, env trigger).</dd>
+            </dl>
+          </div>
+        </details>
+      </article>
+    </div>
   </main>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"
         crossorigin=""></script>
 <script src="./app.js"></script>
 
