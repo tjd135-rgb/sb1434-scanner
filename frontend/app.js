@@ -173,6 +173,46 @@
     return PROPERTY_TYPE_STYLE[key] || PROPERTY_TYPE_STYLE.other;
   }
 
+  // Rough estimated "max units" for a redevelopment underwriting screen.
+  // These numbers are typical Florida infill assumptions PER PROPERTY-TYPE
+  // BUCKET — the actual buildable count is set by the local comp plan, not
+  // SB 1434 itself. They exist so filters like "min 100 units" have
+  // something to grab onto without needing zoning data.
+  const UNITS_PER_ACRE = {
+    // Golf: not-ringed unlocks full comp-plan density; ringed is capped
+    // by the overlay to be neighborhood-compatible (~4-8 u/ac typical).
+    golf:                     20,   // effective average (see pathway_2 override)
+    industrial:               40,   // dense mixed-use conversion
+    commercial:               30,   // vertical retail + residential above
+    office:                   30,   // teardown-to-rental
+    residential:              25,   // densification play (was 8-10 typical)
+    auto_fuel:                40,   // small infill footprint, dense build
+    hospitality:              45,   // hotel-to-condo, downtown / beach
+    restaurant_entertainment: 25,
+    mixed_use:                35,   // intensification of existing MU
+    vacant_commercial:        30,
+    other:                    15,
+  };
+  const RINGED_GOLF_UNITS_PER_ACRE = 5;    // overlay-constrained
+  const NOTRINGED_GOLF_UNITS_PER_ACRE = 30; // full comp-plan flexibility
+
+  // Returns { unitsPerAcre, estUnits, note } or { estUnits: null } when
+  // acres isn't known.
+  function estimateUnits(p) {
+    const acres = Number(p.acres);
+    if (!(acres > 0)) return { unitsPerAcre: null, estUnits: null };
+    const key = propertyTypeKey(p.dor_uc);
+    let upa = UNITS_PER_ACRE[key] || UNITS_PER_ACRE.other;
+    if (key === "golf") {
+      if (p.ring_test_result === "not_ringed") upa = NOTRINGED_GOLF_UNITS_PER_ACRE;
+      else if (p.ring_test_result === "ringed") upa = RINGED_GOLF_UNITS_PER_ACRE;
+    }
+    return {
+      unitsPerAcre: upa,
+      estUnits: Math.round(acres * upa),
+    };
+  }
+
   // ------------------------------------------------------------------
   // DOM refs
   // ------------------------------------------------------------------
@@ -194,6 +234,7 @@
     fUdb: $("f-udb"),
     fMinAcres: $("f-min-acres"),
     fMinLandRatio: $("f-min-land-ratio"),
+    fMinUnits: $("f-min-units"),
     fLandHeavy: $("f-land-heavy"),
     fSatellite: $("f-satellite"),
     fShowBrownfields: $("f-show-brownfields"),
@@ -445,6 +486,19 @@
     if (pa) actions.push(`<a href="${pa.url}" target="_blank" rel="noopener" title="${esc(pa.label)}">County Appraiser</a>`);
     parts.push(`<div class="actions">${actions.join("")}</div>`);
 
+    // Listings — only surfaced when we have an address to search against
+    // (no reliable free listings API, so these open address-based searches
+    // on each site rather than embedded listings).
+    const listings = listingLinks(p);
+    if (listings.length) {
+      parts.push(
+        '<span class="section-h" style="margin-top:8px">Search listings</span>',
+        '<div class="actions">',
+        listings.map((l) => `<a href="${l.url}" target="_blank" rel="noopener" title="${esc(l.title)}">${esc(l.label)} ↗</a>`).join(""),
+        "</div>",
+      );
+    }
+
     return parts.join("");
   }
 
@@ -523,8 +577,9 @@
   }
 
   function renderValueContext(p) {
-    if (p.jv == null && p.lnd_val == null) return "";
-    const parts = ['<div class="value-ctx"><span class="section-h">Value</span><dl>'];
+    const est = estimateUnits(p);
+    if (p.jv == null && p.lnd_val == null && est.estUnits == null) return "";
+    const parts = ['<div class="value-ctx"><span class="section-h">Value &amp; density estimate</span><dl>'];
     if (p.jv != null) parts.push(`<dt>Just value</dt><dd>${fmtCurrency(p.jv)}</dd>`);
     if (p.lnd_val != null) parts.push(`<dt>Land value</dt><dd>${fmtCurrency(p.lnd_val)}</dd>`);
     if (p.land_to_improvement_ratio != null) {
@@ -532,6 +587,14 @@
       const label = r >= 999 ? "Vacant / near-vacant"
         : r >= 1 ? `${r.toFixed(2)}× (land-heavy)` : r.toFixed(2) + "×";
       parts.push(`<dt>Land/improvement</dt><dd>${esc(label)}</dd>`);
+    }
+    if (est.estUnits != null) {
+      // Coarse estimate — flag it as such so nobody mistakes it for
+      // entitled density.
+      parts.push(
+        `<dt title="Rough estimate = acres × typical units/acre for this property type. Actual buildable is set by the local comp plan, not SB 1434.">Est. max units</dt>`,
+        `<dd>${fmtNum(est.estUnits)} <span style="color:#8a92a2;font-family:inherit">(~${est.unitsPerAcre}/ac, rough)</span></dd>`,
+      );
     }
     parts.push("</dl></div>");
     return parts.join("");
@@ -599,6 +662,43 @@
     return `https://www.google.com/maps/@${p.latitude},${p.longitude},500m/data=!3m1!1e3`;
   }
   function paLink(p) { return PA_URLS[p.county_fips] || null; }
+
+  // Listings-search links. No free MLS API exists for a static frontend,
+  // so we can't confirm whether a parcel is actually listed — these
+  // buttons just open an address-based search on each site. If a listing
+  // exists the user sees it in one click; if not, they get an empty-results
+  // page. Only surface the sites that fit the property type.
+  function listingLinks(p) {
+    const addr = addressString(p);
+    if (!addr) return [];
+    const enc = encodeURIComponent(addr);
+    const key = propertyTypeKey(p.dor_uc);
+    const isResidential = key === "residential";
+    const isCommercial = ["commercial", "industrial", "office", "auto_fuel",
+      "hospitality", "restaurant_entertainment", "mixed_use",
+      "vacant_commercial", "golf", "other"].includes(key);
+    const out = [];
+    if (isCommercial) {
+      out.push({
+        label: "LoopNet",
+        url: `https://www.loopnet.com/search/?geography=${enc}`,
+        title: "LoopNet commercial listings search",
+      });
+      out.push({
+        label: "Crexi",
+        url: `https://www.crexi.com/properties?locations=${enc}`,
+        title: "Crexi commercial listings search",
+      });
+    }
+    if (isResidential || isCommercial) {
+      out.push({
+        label: "Zillow",
+        url: `https://www.zillow.com/homes/${enc.replace(/%20/g, "-")}_rb/`,
+        title: "Zillow search",
+      });
+    }
+    return out;
+  }
 
   function esc(s) {
     return String(s ?? "").replace(/[&<>"']/g, (c) => ({
@@ -683,6 +783,10 @@
     const ptKey = els.fPropertyType?.value || "";
     if (ptKey) {
       out = out.filter((p) => propertyTypeKey(p.dor_uc) === ptKey);
+    }
+    const minUnits = parseFloat(els.fMinUnits?.value || "");
+    if (minUnits > 0) {
+      out = out.filter((p) => (estimateUnits(p).estUnits || 0) >= minUnits);
     }
     const q = searchQuery.trim().toLowerCase();
     if (q) {
@@ -1028,6 +1132,7 @@
     els.fPropertyType.addEventListener("change", () => rerender());
     els.fMinAcres.addEventListener("input", debounce(rerun, 350));
     els.fMinLandRatio?.addEventListener("input", debounce(rerun, 350));
+    els.fMinUnits?.addEventListener("input", debounce(() => rerender(), 250));
     els.fLandHeavy?.addEventListener("change", rerun);
     els.fSatellite?.addEventListener("change", () => setBasemap(els.fSatellite.checked));
     els.fShowBrownfields?.addEventListener("change", () => setBrownfieldOverlay(els.fShowBrownfields.checked));
@@ -1040,6 +1145,7 @@
       // Land ratio resets to the default of 1 (land-heavy default) —
       // NOT blank. Users clear it explicitly if they want everything.
       if (els.fMinLandRatio) els.fMinLandRatio.value = "1";
+      if (els.fMinUnits) els.fMinUnits.value = "";
       if (els.fLandHeavy) els.fLandHeavy.checked = false;
       if (els.fSearch) {
         els.fSearch.value = ""; searchQuery = "";

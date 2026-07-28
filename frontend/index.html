@@ -119,6 +119,11 @@
         <input id="f-min-land-ratio" type="number" min="0" step="0.1" value="1" placeholder="0" />
       </label>
 
+      <label class="f-num" title="Rough estimate = acres × typical units/acre for this property type. Filters client-side.">
+        <span>Min est. units</span>
+        <input id="f-min-units" type="number" min="0" step="10" placeholder="0" />
+      </label>
+
       <label class="f-check">
         <input id="f-land-heavy" type="checkbox" />
         <span>Land-heavy only (≥ 1.0)</span>
@@ -330,7 +335,7 @@
         </details>
 
         <details class="intel-section">
-          <summary><span class="s-num">3</span> What the bill unlocks — value creation by property type</summary>
+          <summary><span class="s-num">3</span> What the bill unlocks — density, height, and value by property type</summary>
           <div class="intel-body">
             <p>The scanner organizes deals by <strong>property type</strong>
                (what the parcel <em>is</em> today) — but the <em>value</em>
@@ -338,9 +343,34 @@
                parcel maps to. The pathway is how the parcel qualifies
                under the statute; it shows in every parcel&#39;s detail
                drawer beneath the property-type header.</p>
-            <p>Every qualifying parcel maps to exactly one property type
-               and exactly one pathway. Below, each property-type bucket
-               is paired with the specific SB 1434 unlock available.</p>
+
+            <p class="callout">
+              <strong>What SB 1434 actually unlocks vs. what local code
+              controls.</strong> SB 1434 does <em>not</em> itself set a
+              specific FAR, height limit, or units-per-acre cap.
+              Instead it does three things: (1) streamlines permitting
+              for redevelopment of environmentally impacted parcels,
+              (2) grants qualifying parcels access to whatever density
+              and height the underlying comprehensive plan allows —
+              <em>without</em> the usual downzoning or NIMBY delay tools
+              municipalities often deploy, and (3) for ringed golf
+              courses only, imposes a <strong>compatibility overlay</strong>
+              that caps density around 4-8 units/acre to protect the
+              surrounding single-family neighborhood.
+              <br><br>
+              Building height, FAR, unit count, and setbacks are still
+              set by the <em>local</em> comp plan and zoning code. The
+              typical Florida infill densities cited below are what the
+              underlying zoning most commonly allows in tri-county South
+              Florida — they are <em>not</em> statutory guarantees. Every
+              deal needs a local zoning read.
+            </p>
+
+            <p>Below, each property-type bucket is paired with the specific
+               SB 1434 unlock available. The scanner also computes a
+               <em>rough max-units estimate</em> per parcel
+               (<code>acres × typical units/acre</code>) surfaced in the
+               parcel drawer and filterable via <em>Min est. units</em>.</p>
 
             <h3>Golf courses — not ringed (Pathway 2) ★</h3>
             <p><strong>The highest-value unlock in the entire dataset.</strong>
@@ -349,10 +379,17 @@
                overlay applies. The developer can build at whatever density
                the underlying zoning allows, potentially converting 100+
                acres of low-value recreational land into high-density
-               mixed-use or residential. Cleanup obligation is typically
-               minimal (fertilizer / pesticide surface remediation). This
-               is why Pathway 2 golf courses are the scanner&#39;s "top
-               deals" and get the gold star.</p>
+               mixed-use or residential.</p>
+            <p><em>Typical unlock:</em> 25-35 units/acre on the buildable
+               portion (depending on the underlying comp plan — Miami-Dade
+               T5 / T6 zones support 45-60 u/ac, suburban Broward and PBC
+               typically 15-25). Building heights typically 4-8 stories
+               under compatible zoning, taller in urban cores. Cleanup
+               obligation is usually minimal (fertilizer / pesticide
+               surface remediation, occasionally lead from range decks).
+               This is why Pathway 2 golf courses are the scanner&#39;s
+               "top deals" and get the gold star — the scanner defaults
+               a rough <strong>30 u/ac estimate</strong>.</p>
 
             <h3>Golf courses — ringed or partial (Pathways 1 / 1B)</h3>
             <p>When a course IS ringed by SF residential (80%+ perimeter),
@@ -360,10 +397,16 @@
                compatible with the surrounding neighborhood. Still
                developable, but the upside is capped — plays here are
                limited to repositioning (banquet, wellness, event, resort)
-               rather than full residential conversion. Partially ringed
+               rather than full residential conversion.</p>
+            <p><em>Typical unlock:</em> 3-8 units/acre max, often single-
+               family or low-rise attached at densities comparable to
+               the surrounding neighborhood. Building heights capped at
+               2-3 stories to preserve compatibility. Partially ringed
                courses (40-79%) are borderline; the classification depends
                on how you measure the perimeter, so a detailed boundary
-               survey can move a course from 1B to 2 in your underwriting.</p>
+               survey can move a course from 1B to 2 in your underwriting.
+               The scanner uses a rough <strong>5 u/ac estimate</strong>
+               for ringed golf.</p>
 
             <h3>Industrial / Warehouse (Pathway 3)</h3>
             <p><strong>Often the largest footprints (50-500+ acres) on the
@@ -372,68 +415,130 @@
                unlock is converting obsolete industrial into residential,
                mixed-use, or logistics. Cleanup costs are real but can be
                structured with FDEP Voluntary Cleanup Tax Credits (VCTC)
-               and brownfield site rehabilitation agreements. Zoning-change
-               risk is real too: neighborhoods that grew up around industrial
-               often organize hard against conversion.</p>
+               and brownfield site rehabilitation agreements.</p>
+            <p><em>Typical unlock:</em> 30-50 units/acre on the redeveloped
+               portion in urban cores (Wynwood, Hialeah corridors),
+               15-30 in suburban industrial (Doral, Sunrise). Heights
+               commonly 6-15 stories under mixed-use overlays; industrial
+               land in Opportunity Zones frequently supports 8-12
+               stories. Scanner default: <strong>40 u/ac</strong>.
+               Zoning-change risk is real: neighborhoods that grew up
+               around industrial often organize hard against conversion.</p>
 
             <h3>Commercial / Retail (Pathway 4)</h3>
             <p>Aging strip centers, big-box stores, and regional malls on
                brownfield-adjacent land. SB 1434 can enable densification
                beyond what current commercial zoning allows — turning
-               single-story retail into mixed-use vertical development.
-               Verify tenant tails (a long-dated NNN kills the teardown
-               timing) and check shopping-center reciprocal-easement
-               agreements, which can lock density for decades.</p>
+               single-story retail into mixed-use vertical development.</p>
+            <p><em>Typical unlock:</em> 25-40 units/acre with ground-floor
+               retail preserved. Heights 4-10 stories depending on the
+               corridor. Scanner default: <strong>30 u/ac</strong>. Verify
+               tenant tails (a long-dated NNN kills the teardown timing)
+               and check shopping-center reciprocal-easement agreements,
+               which can lock density for decades.</p>
 
             <h3>Office (Pathway 5)</h3>
             <p>DOR 017-019. Underperforming suburban office parks. The play
                is conversion to residential or mixed-use, enabled by the
-               streamlined permitting pathway. Post-COVID vacancy + SB 1434
+               streamlined permitting pathway.</p>
+            <p><em>Typical unlock:</em> 25-35 units/acre for suburban
+               garden-office redevelopment; 40-70 u/ac in Miami CBD
+               tower-conversion cases. Heights typically 5-12 stories,
+               higher for tower conversions. Scanner default:
+               <strong>30 u/ac</strong>. Post-COVID vacancy + SB 1434
                unlock = teardown-to-rental. Medical office (018) has
                stickier tenants than plain professional (017).</p>
 
             <h3>Residential redevelopment (Pathway 7)</h3>
-            <p>DOR 001-009 on 5+ acres — mobile-home parks and aging garden
-               apartments. SB 1434 enables teardown and rebuild at higher
-               density. These often have motivated sellers (aging
-               infrastructure, deferred maintenance). Mind Florida
-               tenant-displacement statutes — mobile-home-park closures
-               require 6+ months notice plus relocation assistance.</p>
+            <p>DOR 001-009 on 5+ acres — mobile-home parks and aging
+               garden apartments.</p>
+            <p><em>Typical unlock:</em> often a 3-4× density multiplier vs.
+               existing. Mobile-home parks at 8-12 u/ac can redevelop to
+               25-40 u/ac; garden apartments at 15-20 u/ac to 40-60 u/ac.
+               Heights typically 4-8 stories. Scanner default:
+               <strong>25 u/ac</strong>. Mind Florida tenant-displacement
+               statutes — mobile-home-park closures require 6+ months
+               notice plus relocation assistance.</p>
 
             <h3>Auto / Fuel (Pathway 9)</h3>
             <p>DOR 025-028 + 048. Gas stations and auto-repair on
                contaminated sites. Small footprints but <em>high
                environmental-trigger certainty</em> — underground storage
-               tanks are well-documented. The unlock is converting to
-               higher-and-better use after tank removal and site
-               remediation. Cleanup cost IS the deal — expect Phase II
-               ESA and a full remediation estimate before LOI.</p>
+               tanks are well-documented.</p>
+            <p><em>Typical unlock:</em> 30-60 units/acre — small parcels
+               (¼ to 2 acres typical) support intense vertical infill
+               when the underlying corridor zoning allows. Heights
+               5-12 stories in the right corridor. Scanner default:
+               <strong>40 u/ac</strong>. Cleanup cost IS the deal — expect
+               Phase II ESA and a full remediation estimate before LOI.</p>
 
             <h3>Hospitality (Pathway 10)</h3>
             <p>DOR 039. Aging hotels/motels — often in prime locations
-               near beaches or downtown areas. Conversion to residential
-               or mixed-use is the play; on-site historic dry-cleaner
-               exposure is common, plus soft ADR at older properties
-               makes teardown competitive with reposition. Union or brand
-               constraints can complicate exit.</p>
+               near beaches or downtown areas.</p>
+            <p><em>Typical unlock:</em> 40-70 units/acre for hotel-to-
+               condo or mixed-use conversion (South Beach, Downtown
+               Miami). Heights 8-25 stories in the right locations.
+               Scanner default: <strong>45 u/ac</strong>. On-site
+               historic dry-cleaner exposure is common, plus soft ADR at
+               older properties makes teardown competitive with
+               reposition. Union or brand constraints can complicate
+               exit.</p>
 
             <h3>Vacant commercial (Pathway 11)</h3>
             <p>DOR 010. Empty commercial land in cleanup zones — no
                demolition cost, no existing tenants. Pure development
-               play. But vacant commercial in a brownfield zone often
-               means the last owner walked away because remediation was
-               uneconomic; read the FDEP file before pursuing.</p>
+               play.</p>
+            <p><em>Typical unlock:</em> 25-40 units/acre depending on the
+               corridor; heights match the surrounding built context.
+               Scanner default: <strong>30 u/ac</strong>. But vacant
+               commercial in a brownfield zone often means the last
+               owner walked away because remediation was uneconomic;
+               read the FDEP file before pursuing.</p>
 
             <h3>Mixed use (Pathway 12)</h3>
             <p>DOR 030-031. Already mixed-use, eligible for intensification
-               under SB 1434&#39;s streamlined pathway. Check current FAR
-               utilization vs. what SB 1434 unlocks — sometimes the
+               under SB 1434&#39;s streamlined pathway.</p>
+            <p><em>Typical unlock:</em> 30-50 units/acre — the intensification
+               vs. what&#39;s already built. Heights typically match the
+               existing FAR envelope + 20-40% under SB 1434 permitting.
+               Scanner default: <strong>35 u/ac</strong>. Check current
+               FAR utilization vs. what SB 1434 unlocks — sometimes the
                existing envelope already burns the entitlement.</p>
 
             <h3>Restaurant / Entertainment &amp; Other</h3>
             <p>Everything that passed all five gates but doesn&#39;t fit
-               the buckets above. Eyeball the DOR use code and current
-               use before deciding whether to pursue.</p>
+               the buckets above. Scanner defaults: 25 u/ac
+               (restaurant/entertainment), 15 u/ac (other). Eyeball
+               the DOR use code and current use before deciding whether
+               to pursue.</p>
+
+            <h3 style="border-top:1px solid #e0e4ec;padding-top:14px">
+              Building height under SB 1434
+            </h3>
+            <p>SB 1434 does not directly set height limits. However, the
+               statute&#39;s streamlined-permitting provisions typically
+               let qualifying parcels reach the <strong>maximum height
+               allowed by the underlying zoning</strong> without
+               discretionary review, which in practice means:</p>
+            <ul>
+              <li><strong>Miami-Dade urban core (T5-T6):</strong> up to
+                  25-40+ stories in Downtown / Brickell / Wynwood / Edgewater
+                  where zoning permits.</li>
+              <li><strong>Broward &amp; PBC commercial corridors:</strong>
+                  typically 6-15 stories along US-1, Federal Highway, Sunrise
+                  Boulevard.</li>
+              <li><strong>Suburban Broward / PBC:</strong> generally
+                  4-8 stories.</li>
+              <li><strong>Ringed golf courses:</strong> 2-3 stories
+                  (overlay-constrained).</li>
+              <li><strong>Coastal beachfront (South Beach, Fort Lauderdale
+                  Beach):</strong> subject to CBRS / hurricane-code and
+                  local height caps that can override.</li>
+            </ul>
+            <p>Bottom line: SB 1434 removes the <em>permitting friction</em>
+               around reaching the underlying zoning&#39;s density and
+               height caps. It does not raise those caps. Every deal needs
+               a specific comp-plan + zoning read on the parcel.</p>
           </div>
         </details>
 
@@ -932,6 +1037,18 @@
                   (Google Maps satellite search by the parcel&#39;s address
                   — falls back to lat/lng if no address on file), and the
                   correct county property-appraiser deep link.</li>
+              <li><strong>Search listings</strong>: address-based search
+                  links for LoopNet / Crexi (commercial) and Zillow
+                  (residential/general). No free MLS API is accessible
+                  from a static frontend, so these open the parcel&#39;s
+                  address on each site — if a listing exists you see it
+                  in one click; if not, you get an empty-results page.
+                  Only surfaced when we have a physical address on file.</li>
+              <li><strong>Est. max units</strong>: shown in the Value &amp;
+                  density estimate box. Rough figure computed as
+                  <code>acres × typical units/acre for the property type</code>
+                  — see <em>The Bill · §3</em> for the per-type ranges.
+                  Filter for this via <em>Min est. units</em>.</li>
             </ul>
           </div>
         </details>
@@ -1017,6 +1134,15 @@
               <dd>Shortcut for min ratio ≥ 1.0 (redundant when the default
                   is already 1.0, useful when you&#39;ve raised the ratio
                   above 1 and want to snap back).</dd>
+              <dt>Min est. units</dt>
+              <dd>Client-side minimum on the scanner&#39;s rough max-units
+                  estimate (<code>acres × typical units/acre for the
+                  property type</code>). Filter to "≥ 200 units" for
+                  meaningful-scale opportunities; "≥ 500" for large
+                  redevelopment plays. Estimates use property-type-typical
+                  densities documented in <em>The Bill · §3</em> and are
+                  <strong>rough</strong> — the actual buildable count is
+                  set by local zoning, not the scanner.</dd>
               <dt>Satellite</dt>
               <dd>Swaps the map basemap.</dd>
               <dt>Watchlist toggle</dt>
@@ -1052,7 +1178,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
         crossorigin=""></script>
-<script src="./app.js"></script>
+<script src="./app.js?v=2026-07-28-density"></script>
 
 </body>
 </html>
