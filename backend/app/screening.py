@@ -168,6 +168,11 @@ _INSERT_QUALIFIERS_SQL = """
         p.lnd_sqfoot >= :min_sqfoot
         AND p.county_fips IN ('23','16','60')
         AND p.geom IS NOT NULL
+        -- Require a real DOR use code — parcels with NULL / blank
+        -- dor_uc can't be classified into a property type and aren't
+        -- actionable as redevelopment targets.
+        AND p.dor_uc IS NOT NULL
+        AND p.dor_uc <> ''
         -- Gate 3: at least one environmental trigger present.
         AND (ba.area_id IS NOT NULL OR cs.site_id IS NOT NULL)
         -- Gate 5A: exclude agricultural (DOR 050-069).
@@ -247,10 +252,27 @@ _INSERT_QUALIFIERS_SQL = """
                 OR p.own_name ILIKE '%MUNICIPAL%'
                 OR p.own_name ILIKE '%GOVERNMENT%'
                 OR p.own_name ILIKE '%SCHOOL BOARD%'
+                -- Water-management district — needs the abbreviated
+                -- variants because DOR uses MGMT / FLA / DIST.
                 OR p.own_name ILIKE '%WATER MANAGEMENT%'
+                OR p.own_name ILIKE '%WATER MGMT%'
                 OR p.own_name ILIKE '%SOUTH FLORIDA WATER%'
+                OR p.own_name ILIKE '%SOUTH FLA WATER%'
+                OR p.own_name ILIKE '%S FLA WATER%'
                 OR p.own_name ILIKE '%DEPARTMENT OF%'
+                OR p.own_name ILIKE '%DEPT OF%'
                 OR p.own_name ILIKE '%AUTHORITY%'
+                OR p.own_name ILIKE '%HOUSING AUTH%'
+                OR p.own_name ILIKE '%PORT AUTH%'
+                -- Land-conservation entities — public or non-profit,
+                -- but never selling their preserve holdings for infill.
+                OR p.own_name ILIKE '%CONSERVATION%'
+                OR p.own_name ILIKE '%PRESERVE%'
+                OR p.own_name ILIKE '%LAND TRUST%'
+                OR p.own_name ILIKE '%NATURE%'
+                OR p.own_name ILIKE '%REDEVELOPMENT AGENCY%'
+                OR p.own_name ILIKE '%CRA%'
+                OR p.own_name ILIKE '%TAXING%'
             )
         )
     ON CONFLICT (parcel_id) DO UPDATE SET

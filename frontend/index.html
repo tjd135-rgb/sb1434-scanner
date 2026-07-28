@@ -317,15 +317,26 @@
                   owner). The 15-year title lookback the statute requires
                   isn&#39;t automatable, so these are excluded rather than
                   flagged.</li>
-              <li><strong>Broad government ownership</strong> — any owner
-                  name containing COUNTY (with or without OF), CITY OF,
-                  TOWN OF, VILLAGE OF, MUNICIPAL, GOVERNMENT, DISTRICT,
-                  STATE OF FLORIDA, UNITED STATES, SCHOOL BOARD or
-                  SCHOOL DISTRICT, WATER MANAGEMENT / SOUTH FLORIDA
-                  WATER. Excluded <em>unless</em> the DOR use code is
-                  commercial or industrial (010-049) — governments
-                  sometimes own leasable commercial land that&#39;s still
-                  actionable.</li>
+              <li><strong>Broad government &amp; conservation ownership</strong>
+                  — any owner name containing COUNTY (with or without
+                  OF), CITY OF / TOWN OF / VILLAGE OF, MUNICIPAL,
+                  GOVERNMENT, DISTRICT, STATE OF, UNITED STATES, SCHOOL
+                  BOARD, WATER MANAGEMENT / WATER MGMT / SOUTH FLORIDA
+                  WATER / SOUTH FLA WATER (all common abbreviations),
+                  DEPARTMENT OF / DEPT OF, AUTHORITY, HOUSING AUTH,
+                  PORT AUTH, plus land-conservation entities
+                  (CONSERVATION, PRESERVE, LAND TRUST, NATURE) and
+                  CRA / REDEVELOPMENT AGENCY / TAXING. Excluded
+                  <em>unless</em> the DOR use code is commercial or
+                  industrial (010-049) AND the owner-name doesn&#39;t
+                  flag transportation infrastructure (AIRPORT / AIR
+                  PORT / TRANSIT / BUS TERMINAL). None of these owners
+                  are realistic sellers.</li>
+              <li><strong>No DOR use code.</strong> Parcels with
+                  <code>NULL</code> or blank <code>dor_uc</code> can&#39;t
+                  be classified into a property type and are excluded
+                  outright — they&#39;re typically data-quality issues
+                  in the DOR file, not actionable parcels.</li>
               <li><strong>Military owner patterns</strong> — parcels whose
                   owner name contains AIR BASE / AIR FORCE / MILITARY /
                   NAVY / ARMY / NATIONAL GUARD / COAST GUARD, catching
