@@ -115,6 +115,11 @@
       </label>
 
       <label class="f-num">
+        <span>Max acres</span>
+        <input id="f-max-acres" type="number" min="0" step="1" placeholder="—" />
+      </label>
+
+      <label class="f-num">
         <span>Min land/imp ratio</span>
         <input id="f-min-land-ratio" type="number" min="0" step="0.1" value="1" placeholder="0" />
       </label>
@@ -180,10 +185,28 @@
       <div class="list-toolbar">
         <div>
           <strong id="list-count">0</strong> parcels
-          <span class="list-hint">· sorted by acres · click a card for full detail</span>
+          <span class="list-hint">· click a row for full detail · click any column header to sort</span>
         </div>
       </div>
-      <div id="list-container" class="list-container"></div>
+      <div class="table-scroll">
+        <table id="parcel-table" class="parcel-table">
+          <thead>
+            <tr>
+              <th data-sort="property_type">Property Type</th>
+              <th data-sort="own_name">Owner</th>
+              <th data-sort="address">Address</th>
+              <th data-sort="county">County</th>
+              <th data-sort="acres" class="num" data-default-dir="desc">Acres</th>
+              <th data-sort="jv" class="num">JV</th>
+              <th data-sort="ratio" class="num">Land/Imp</th>
+              <th data-sort="env_trigger">Env Trigger</th>
+              <th data-sort="pathway_hint">Pathway</th>
+              <th class="actions-col">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="parcel-tbody"></tbody>
+        </table>
+      </div>
       <div id="list-empty" class="list-empty hidden">
         No qualifying parcels match the current filters.
       </div>
@@ -1189,7 +1212,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
         crossorigin=""></script>
-<script src="./app.js?v=2026-07-28-density"></script>
+<script src="./app.js?v=2026-07-28-table"></script>
 
 </body>
 </html>

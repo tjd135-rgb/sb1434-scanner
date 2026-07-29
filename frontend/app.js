@@ -233,6 +233,7 @@
     fRing: $("f-ring"),
     fUdb: $("f-udb"),
     fMinAcres: $("f-min-acres"),
+    fMaxAcres: $("f-max-acres"),
     fMinLandRatio: $("f-min-land-ratio"),
     fMinUnits: $("f-min-units"),
     fLandHeavy: $("f-land-heavy"),
@@ -243,7 +244,8 @@
     fExportCsv: $("f-export-csv"),
     fSearch: $("f-search"),
     fSearchClear: $("f-search-clear"),
-    listContainer: $("list-container"),
+    parcelTable: $("parcel-table"),
+    parcelTbody: $("parcel-tbody"),
     listCount: $("list-count"),
     listEmpty: $("list-empty"),
     welcomeBanner: $("welcome-banner"),
@@ -763,6 +765,8 @@
     for (const [k, v] of Object.entries(mapping)) if (v) q.set(k, v);
     const minAcres = els.fMinAcres.value.trim();
     if (minAcres !== "") q.set("min_acres", minAcres);
+    const maxAcres = els.fMaxAcres?.value.trim();
+    if (maxAcres) q.set("max_acres", maxAcres);
     const mr = els.fMinLandRatio?.value.trim();
     if (mr) q.set("min_land_ratio", mr);
     // Land-heavy shortcut wins over the numeric field when both set.
@@ -852,88 +856,129 @@
   // List view
   // ------------------------------------------------------------------
 
+  // Sort state for the table. Default = acres DESC (largest parcels
+  // first) since that's how the API returns them.
+  let tableSort = { key: "acres", dir: "desc" };
+
+  // Per-row value the sort comparator operates on.
+  function sortValue(p, key) {
+    switch (key) {
+      case "property_type": return propertyType(p.dor_uc);
+      case "own_name":      return (p.own_name || "").toLowerCase();
+      case "address":       return (addressString(p) || "").toLowerCase();
+      case "county":        return COUNTY_NAMES[p.county_fips] || "";
+      case "acres":         return Number(p.acres) || 0;
+      case "jv":            return Number(p.jv) || 0;
+      case "ratio":         return Number(p.land_to_improvement_ratio) || 0;
+      case "env_trigger":   return p.env_trigger || "";
+      case "pathway_hint":  return p.pathway_hint || "";
+      default:              return "";
+    }
+  }
+
+  function sortedRows(rows) {
+    const { key, dir } = tableSort;
+    const mult = dir === "asc" ? 1 : -1;
+    return rows.slice().sort((a, b) => {
+      const va = sortValue(a, key);
+      const vb = sortValue(b, key);
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * mult;
+      return String(va).localeCompare(String(vb)) * mult;
+    });
+  }
+
   function renderList(rows) {
     els.listCount.textContent = fmtNum(rows.length);
     els.listEmpty.classList.toggle("hidden", rows.length > 0);
+    els.parcelTable.style.display = rows.length ? "" : "none";
+
+    const sorted = sortedRows(rows);
     const frag = document.createDocumentFragment();
-    for (const p of rows) frag.appendChild(makeCard(p));
-    els.listContainer.replaceChildren(frag);
+    for (const p of sorted) frag.appendChild(makeRow(p));
+    els.parcelTbody.replaceChildren(frag);
+
+    // Sort indicator on the active column header
+    els.parcelTable.querySelectorAll("thead th").forEach((th) => {
+      const active = th.dataset.sort === tableSort.key;
+      th.classList.toggle("active-sort", active);
+      const existing = th.querySelector(".sort-dir");
+      if (existing) existing.remove();
+      if (active) {
+        const arrow = document.createElement("span");
+        arrow.className = "sort-dir";
+        arrow.textContent = tableSort.dir === "asc" ? "▲" : "▼";
+        th.appendChild(arrow);
+      }
+    });
   }
 
-  function makeCard(p) {
-    const style = styleForPathway(p.pathway_hint);
+  function makeRow(p) {
+    const style = styleForPropertyType(propertyTypeKey(p.dor_uc));
+    const pathwayStyle = styleForPathway(p.pathway_hint);
     const county = COUNTY_NAMES[p.county_fips] || p.county_fips || "—";
     const addr = addressString(p);
     const isTopDeal = p.pathway_hint === "pathway_2_golf_not_ringed";
     const watched = isWatched(p.parcel_id);
+    const ratio = p.land_to_improvement_ratio;
+    const ratioLabel = ratio == null ? "—"
+      : Number(ratio) >= 999 ? "Vacant"
+      : `${Number(ratio).toFixed(2)}×`;
+    const dot = isTopDeal
+      ? `<span class="pt-dot star" style="background:#f2b731" title="Top deal"></span>`
+      : `<span class="pt-dot" style="background:${style.color}"></span>`;
 
-    const card = document.createElement("article");
-    card.className = "card" + (isTopDeal ? " card-top" : "");
-    card.style.borderLeftColor = style.color;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td title="DOR ${esc(p.dor_uc || "—")}">${dot}${esc(propertyType(p.dor_uc))}</td>
+      <td>${esc(p.own_name || "(no owner)")}</td>
+      <td>${addr ? esc(addr) : '<span class="no-addr">No address</span>'}</td>
+      <td>${esc(county)}</td>
+      <td class="num">${fmtNum(p.acres, 1)}</td>
+      <td class="num">${p.jv == null ? "—" : fmtCurrency(p.jv)}</td>
+      <td class="num" title="Land value ÷ improvement value">${esc(ratioLabel)}</td>
+      <td>${esc(p.env_trigger || "—")}</td>
+      <td><span class="pathway-tag${isTopDeal ? " top-deal-flag" : ""}" style="color:${pathwayStyle.color}">${esc(pathwayStyle.label)}</span></td>
+      <td class="actions">
+        <button class="star${watched ? " on" : ""}" type="button" title="Toggle watchlist">${watched ? "★" : "☆"}</button>
+        ${aerialUrl(p) ? `<a href="${aerialUrl(p)}" target="_blank" rel="noopener" title="Aerial view">🛰️</a>` : ""}
+      </td>
+    `;
 
-    const parts = [];
-    parts.push('<div class="card-head">');
-    parts.push(
-      `<div class="card-title-block">`,
-      `<h3 class="card-title">${esc(propertyType(p.dor_uc))}</h3>`,
-      `<div class="card-pathway" style="color:${style.color}">SB 1434 Pathway: ${esc(style.label)}</div>`,
-      `</div>`,
-      `<div style="display:flex; align-items:center; gap:6px;">`,
-      `<span class="card-meta">${fmtNum(p.acres, 1)} acres · ${esc(county)}</span>`,
-      `<button class="card-star${watched ? " on" : ""}" type="button" data-star="${esc(p.parcel_id || "")}" title="Toggle watchlist">${watched ? "★" : "☆"}</button>`,
-      `</div>`,
-    );
-    parts.push("</div>");
-
-    parts.push(`<p class="card-owner">${esc(p.own_name || "(no owner listed)")}</p>`);
-    const idLine = [
-      `<span class="mono">${esc(p.parcel_id || "—")}</span>`,
-      p.dor_uc ? `DOR ${esc(p.dor_uc)}` : null,
-      addr ? esc(addr) : '<span class="no-addr">No address on file</span>',
-    ].filter(Boolean).join(" · ");
-    parts.push(`<p class="card-id">${idLine}</p>`);
-
-    parts.push(renderValueContext(p));
-    parts.push(renderGateChecklist(p));
-
-    if (style.angle) {
-      parts.push(
-        '<div class="card-angle"><span class="section-h">Redevelopment angle</span>',
-        `<p>${esc(style.angle)}</p></div>`,
-      );
-    }
-
-    // Actions — no primary "Search Google" here; the whole card opens the
-    // drawer, and Search-Google lives inside the drawer.
-    const actions = [];
-    const aer = aerialUrl(p);
-    if (aer) actions.push(`<a class="btn" href="${aer}" target="_blank" rel="noopener">🛰️ Aerial</a>`);
-    const pa = paLink(p);
-    if (pa) actions.push(`<a class="btn" href="${pa.url}" target="_blank" rel="noopener" title="${esc(pa.label)}">County Appraiser</a>`);
-    actions.push(`<button class="btn copy-btn" type="button" data-copy="${esc(p.parcel_id || "")}">Copy Parcel ID</button>`);
-    parts.push(`<div class="card-actions">${actions.join("")}</div>`);
-
-    card.innerHTML = parts.join("");
-
-    // Whole card is a click-target — outside links, star, copy — opens drawer.
-    card.addEventListener("click", (e) => {
+    // Row click → open drawer (except when clicking a button/link).
+    tr.addEventListener("click", (e) => {
       if (e.target.closest("a, button")) return;
+      // Deselect any previously selected row, mark this one.
+      els.parcelTbody.querySelectorAll("tr.selected").forEach((r) => r.classList.remove("selected"));
+      tr.classList.add("selected");
       openDrawer(p);
     });
 
-    // Star toggle wired inline (avoids relying on global delegation
-    // ordering with other click handlers).
-    const starBtn = card.querySelector(".card-star");
-    if (starBtn) {
-      starBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const nowOn = toggleWatched(p.parcel_id);
-        starBtn.classList.toggle("on", nowOn);
-        starBtn.textContent = nowOn ? "★" : "☆";
-      });
-    }
+    // Star toggle — matches map-drawer star behavior.
+    const starBtn = tr.querySelector(".star");
+    starBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const nowOn = toggleWatched(p.parcel_id);
+      starBtn.classList.toggle("on", nowOn);
+      starBtn.textContent = nowOn ? "★" : "☆";
+    });
 
-    return card;
+    return tr;
+  }
+
+  function initTableSort() {
+    els.parcelTable.querySelectorAll("thead th[data-sort]").forEach((th) => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.sort;
+        if (tableSort.key === key) {
+          tableSort.dir = tableSort.dir === "asc" ? "desc" : "asc";
+        } else {
+          tableSort.key = key;
+          tableSort.dir = th.dataset.defaultDir || "asc";
+        }
+        // Re-render only the list (data hasn't changed, sort has).
+        renderList(applyClientFilters(lastRows));
+      });
+    });
   }
 
   // ------------------------------------------------------------------
@@ -1152,6 +1197,7 @@
     });
     els.fPropertyType.addEventListener("change", () => rerender());
     els.fMinAcres.addEventListener("input", debounce(rerun, 350));
+    els.fMaxAcres?.addEventListener("input", debounce(rerun, 350));
     els.fMinLandRatio?.addEventListener("input", debounce(rerun, 350));
     els.fMinUnits?.addEventListener("input", debounce(() => rerender(), 250));
     els.fLandHeavy?.addEventListener("change", rerun);
@@ -1163,6 +1209,7 @@
       els.fCounty.value = ""; els.fPropertyType.value = "";
       els.fEnv.value = ""; els.fRing.value = ""; els.fUdb.value = "";
       els.fMinAcres.value = "";
+      if (els.fMaxAcres) els.fMaxAcres.value = "";
       // Land ratio resets to the default of 1 (land-heavy default) —
       // NOT blank. Users clear it explicitly if they want everything.
       if (els.fMinLandRatio) els.fMinLandRatio.value = "1";
@@ -1363,6 +1410,7 @@
   initCopyDelegation();
   initWatchlist();
   initDrawer();
+  initTableSort();
   updateTopbarHeight();
   loadParcels();
 })();

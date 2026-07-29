@@ -201,6 +201,13 @@ _INSERT_QUALIFIERS_SQL = """
         -- clubs, sanitariums, cultural orgs. Not actionable as
         -- redevelopment targets at scale.
         AND NOT (p.dor_uc BETWEEN '070' AND '079')
+        -- Gate 5E2: exclude ALL government DOR codes (080-089).
+        -- 080 vacant govt, 081 military, 082 parks, 083 public schools,
+        -- 084 colleges, 085 hospitals, 086 county, 087 state, 088
+        -- federal, 089 municipal. Owner-name matches sometimes miss
+        -- these (DOR uses abbreviated names); the DOR code itself is
+        -- authoritative that the parcel is govt-held.
+        AND NOT (p.dor_uc BETWEEN '080' AND '089')
         -- Gate 5F: exclude the additional school DOR codes not already
         -- caught by 070-079: 084 colleges. Also 020 airports/bus/marine
         -- terminals — infrastructure, not redevelopable land.

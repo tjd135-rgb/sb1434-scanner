@@ -240,6 +240,7 @@ def list_qualifying_parcels(
         None, description="'brownfield_area', 'cleanup_site', or 'both'"
     ),
     min_acres: float = Query(5.0, ge=0),
+    max_acres: Optional[float] = Query(None, ge=0, description="Upper bound on parcel acres"),
     adjacent_only: bool = Query(
         False, description="If true, restrict to parcels that pass Gate 4"
     ),
@@ -273,6 +274,9 @@ def list_qualifying_parcels(
     # can't introduce column-ambiguity errors.
     where = ["qp.acres >= :min_acres"]
     params: Dict[str, Any] = {"min_acres": min_acres, "lim": limit, "off": offset}
+    if max_acres is not None:
+        where.append("qp.acres <= :max_acres")
+        params["max_acres"] = max_acres
     if county:
         where.append("qp.county_fips = :cf")
         params["cf"] = county
