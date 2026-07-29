@@ -288,12 +288,23 @@
   let watchlist = loadWatchlist();
 
   function isWatched(pid) { return !!watchlist[pid]; }
-  function toggleWatched(pid) {
+  // toggleWatched now takes the full parcel object as a second arg. When
+  // starring, we snapshot the whole parcel into localStorage so the
+  // watchlist survives backend re-screens that would otherwise drop the
+  // parcel out of qualifying_parcels (e.g. new govt-owner exclusion
+  // removes a parcel the user starred yesterday). Existing legacy
+  // entries (from before this change) have no snapshot; they'll render
+  // as a placeholder row until re-starred.
+  function toggleWatched(pid, parcelData) {
     if (!pid) return false;
     if (watchlist[pid]) {
       delete watchlist[pid];
     } else {
-      watchlist[pid] = { added_at: new Date().toISOString(), note: "" };
+      watchlist[pid] = {
+        added_at: new Date().toISOString(),
+        note: "",
+        parcel: parcelData || null,
+      };
     }
     saveWatchlist(watchlist);
     updateWatchlistCount();
@@ -301,6 +312,34 @@
     // re-render to remove it from the map/list.
     if (watchlistFilterOn) rerender();
     return isWatched(pid);
+  }
+  // Return every watchlisted parcel that isn't already in `fetched` — these
+  // are the "stub" rows we synthesize from the localStorage snapshot so the
+  // list doesn't silently vanish when a starred parcel gets excluded by a
+  // backend re-screen.
+  function watchlistSnapshotsMissingFrom(fetched) {
+    const seen = new Set(fetched.map((p) => p.parcel_id));
+    const out = [];
+    for (const [pid, entry] of Object.entries(watchlist)) {
+      if (seen.has(pid)) continue;
+      if (entry && entry.parcel) {
+        // Mark as a snapshot so the renderer can flag it visually.
+        out.push({ ...entry.parcel, _fromSnapshot: true });
+      } else {
+        // Legacy entry with no parcel data — show a placeholder row so
+        // the user at least knows the ID they starred is still tracked.
+        out.push({
+          parcel_id: pid,
+          _fromSnapshot: true,
+          _placeholder: true,
+          own_name: "(no cached data — re-star to refresh)",
+          county_fips: null,
+          acres: null,
+          dor_uc: null,
+        });
+      }
+    }
+    return out;
   }
   function setWatchNote(pid, note) {
     if (!pid || !watchlist[pid]) return;
@@ -400,7 +439,7 @@
     const starBtn = els.drawerBody.querySelector(".drawer-star");
     if (starBtn) {
       starBtn.addEventListener("click", () => {
-        const on = toggleWatched(parcel.parcel_id);
+        const on = toggleWatched(parcel.parcel_id, parcel);
         // Re-render drawer to show/hide the note input.
         openDrawer(parcel);
       });
@@ -822,7 +861,13 @@
       });
     }
     if (watchlistFilterOn) {
-      out = out.filter((p) => isWatched(p.parcel_id));
+      // Union: watched rows from the current fetch + local snapshots for
+      // watched parcels that AREN'T in the current fetch. This makes the
+      // watchlist survive a backend re-screen that would otherwise drop
+      // a starred parcel out of qualifying_parcels.
+      const fromFetch = out.filter((p) => isWatched(p.parcel_id));
+      const snapshots = watchlistSnapshotsMissingFrom(fromFetch);
+      out = [...fromFetch, ...snapshots];
     }
     return out;
   }
@@ -957,7 +1002,7 @@
     const starBtn = tr.querySelector(".star");
     starBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const nowOn = toggleWatched(p.parcel_id);
+      const nowOn = toggleWatched(p.parcel_id, p);
       starBtn.classList.toggle("on", nowOn);
       starBtn.textContent = nowOn ? "★" : "☆";
     });
